@@ -27,6 +27,7 @@
     up: '<path d="m18 15-6-6-6 6"/>',
     down: '<path d="m6 9 6 6 6-6"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
     trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
@@ -92,10 +93,8 @@
   const FLATS = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
   const DEGREE_SEMI = { 1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11 };
   const SEMI_DEGREE = ['1', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
-  const SOLFA = {
-    1: 'do', '#1': 'di', b2: 'ra', 2: 're', '#2': 'ri', b3: 'me', 3: 'mi', '#3': 'fa', b4: 'mi', 4: 'fa', '#4': 'fi',
-    b5: 'se', 5: 'so', '#5': 'si', b6: 'le', 6: 'la', '#6': 'li', b7: 'te', 7: 'ti', '#7': 'do', b1: 'ti',
-  };
+  // Chromatic sol-fa by semitone above "do": do de re ma mi fa fi so zi la ta ti
+  const SOLFA_SEMI = ['do', 'de', 're', 'ma', 'mi', 'fa', 'fi', 'so', 'zi', 'la', 'ta', 'ti'];
   const FLAT_KEYS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm']);
   const KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B',
     'Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'];
@@ -107,20 +106,35 @@
   const prettyKey = (k) => String(k || '').replace(/^([A-G])b/, '$1♭').replace(/^([A-G])#/, '$1♯');
   const prettyQual = (q) => q.replace(/b(?=\d)/g, '♭').replace(/#(?=\d)/g, '♯');
 
-  const QUAL_RE = /^(?:maj|min|m|M|dim|aug|sus|add|no|°|ø|\+|-|[b#♭♯](?=\d)|\d|\(|\)|,)*$/;
-  const NUM_RE = /^([b#♭♯]?)([1-7])([^/]*?)(?:\/([b#♭♯]?)([1-7]))?$/;
-  const LET_RE = /^([A-G])([b#♭♯]?)([^/]*?)(?:\/([A-G])([b#♭♯]?))?$/;
+  /** Words and symbols people type -> one spelling: "flat6"/"6flat"/"♭6" -> b6, "aug" -> +, "dim" -> °. */
+  function normTok(t) {
+    return String(t)
+      .replace(/flat/gi, 'b').replace(/sharp/gi, '#').replace(/♭/g, 'b').replace(/♯/g, '#')
+      .replace(/half-?dim(?:inished)?/gi, 'ø')
+      .replace(/aug(?:mented|ment)?/gi, '+')
+      .replace(/dim(?:inished)?/gi, '°');
+  }
+  /** Turn typed words into symbols inside a chord, keeping everything else as written. */
+  const symbolizeTok = (t) => String(t).replace(/flat/gi, '♭').replace(/sharp/gi, '♯');
+
+  const QUAL_RE = /^(?:maj|min|m|M|Δ|sus|add|no|°|ø|\+|-|[b#](?=\d)|\d|\(|\)|,)*$/;
+  // Accidental may come before (b6, #4) or after the number (6b, 5#); "7b9" keeps b9 as an extension.
+  const NUM_RE = /^([b#]?)([1-7])([b#](?!\d))?([^/]*?)(?:\/([b#]?)([1-7])([b#](?!\d))?)?$/;
+  const LET_RE = /^([A-G])([b#]?)([^/]*?)(?:\/([A-G])([b#]?))?$/;
 
   function parseNum(tok) {
-    const m = NUM_RE.exec(tok);
-    if (!m || !QUAL_RE.test(m[3])) return null;
-    return { acc: normAcc(m[1]), deg: +m[2], qual: m[3], bass: m[5] ? { acc: normAcc(m[4]), deg: +m[5] } : null };
+    const m = NUM_RE.exec(normTok(tok));
+    if (!m || !QUAL_RE.test(m[4])) return null;
+    return {
+      acc: m[1] || m[3] || '', post: !m[1] && !!m[3], deg: +m[2], qual: m[4],
+      bass: m[6] ? { acc: m[5] || m[7] || '', post: !m[5] && !!m[7], deg: +m[6] } : null,
+    };
   }
   const noteSemi = (letter, acc) => (NOTE_SEMI[letter] + (acc === '#' ? 1 : acc === 'b' ? -1 : 0) + 12) % 12;
   function parseLetter(tok) {
-    const m = LET_RE.exec(tok);
+    const m = LET_RE.exec(normTok(tok));
     if (!m || !QUAL_RE.test(m[3])) return null;
-    return { root: noteSemi(m[1], normAcc(m[2])), qual: m[3], bass: m[4] ? noteSemi(m[4], normAcc(m[5])) : null };
+    return { root: noteSemi(m[1], m[2]), qual: m[3], bass: m[4] ? noteSemi(m[4], m[5]) : null };
   }
   function keyInfo(key) {
     const m = /^([A-G])([b#♭♯]?)(m?)$/.exec(String(key || '').trim());
@@ -138,8 +152,8 @@
     return deg(p.root) + p.qual + (p.bass != null ? '/' + deg(p.bass) : '');
   }
 
-  function noteName(acc, deg, mode, key) {
-    if (mode === 'solfa') return SOLFA[acc + deg] || prettyAcc(acc) + SOLFA[deg];
+  function noteName(acc, deg, mode, key, post) {
+    if (mode === 'solfa') return SOLFA_SEMI[numSemi(acc, deg)];
     if (mode === 'letters') {
       const k = keyInfo(key);
       if (k) {
@@ -147,22 +161,151 @@
         return (flat ? FLATS : SHARPS)[(k.semi + numSemi(acc, deg)) % 12];
       }
     }
-    return prettyAcc(acc) + deg;
+    return post ? deg + prettyAcc(acc) : prettyAcc(acc) + deg;
+  }
+
+  function parseAny(tok, songKey) {
+    let p = parseNum(tok);
+    if (!p && parseLetter(tok) && keyInfo(songKey)) p = parseNum(letterToNumber(tok, songKey));
+    return p;
   }
 
   /** One chord token -> display HTML for the current mode (numbers / solfa / letters) and part (keys / bass). */
   function chordHTML(tok, o) {
-    let p = parseNum(tok);
-    if (!p && parseLetter(tok) && keyInfo(o.songKey)) p = parseNum(letterToNumber(tok, o.songKey));
+    const p = parseAny(tok, o.songKey);
     if (!p) return esc(tok);
     if (o.part === 'bass') {
       const b = p.bass || p;
-      return esc(noteName(b.acc, b.deg, o.mode, o.viewKey));
+      return esc(noteName(b.acc, b.deg, o.mode, o.viewKey, b.post));
     }
-    let h = esc(noteName(p.acc, p.deg, o.mode, o.viewKey));
+    let h = esc(noteName(p.acc, p.deg, o.mode, o.viewKey, p.post));
     if (p.qual) h += `<span class="q">${esc(prettyQual(p.qual))}</span>`;
-    if (p.bass) h += '/' + esc(noteName(p.bass.acc, p.bass.deg, o.mode, o.viewKey));
+    if (p.bass) h += '/' + esc(noteName(p.bass.acc, p.bass.deg, o.mode, o.viewKey, p.bass.post));
     return h;
+  }
+  /** Clickable chord: tapping it opens the note spelling. */
+  const chordBtn = (tok, o) => (parseAny(tok, o.songKey) ? `<span class="ch" data-ch="${esc(tok)}">${chordHTML(tok, o)}</span>` : esc(tok));
+
+  /* ================= chord spelling ================= */
+  const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  const ACC_SIGN = { '-2': '𝄫', '-1': '♭', 0: '', 1: '♯', 2: '𝄪' };
+
+  /** Chord quality -> chord tones as {semi above root, letter step above root, label}. */
+  function chordTones(q) {
+    let s = normTok(q).replace(/[()\s,]/g, '');
+    let third = { semi: 4, step: 2, label: '3' }, fifth = { semi: 7, step: 4, label: '5' }, seventh = null, power = false;
+    const ext = [];
+    const eat = (re) => { const m = re.exec(s); if (m) s = s.slice(m[0].length); return m; };
+    const tone = (n, acc = '') => {
+      const base = { 2: [2, 1], 4: [5, 3], 6: [9, 5], 9: [14, 1], 11: [17, 3], 13: [21, 5] }[n];
+      if (!base) return null;
+      return { semi: base[0] + (acc === '#' ? 1 : acc === 'b' ? -1 : 0), step: base[1], label: prettyAcc(acc) + n };
+    };
+    const upper = (n) => { if (n >= 9) ext.push(tone(9)); if (n === 11) ext.push(tone(11)); if (n === 13) ext.push(tone(13)); };
+    let m;
+    if (eat(/^ø7?/)) { third = { semi: 3, step: 2, label: '♭3' }; fifth = { semi: 6, step: 4, label: '♭5' }; seventh = { semi: 10, step: 6, label: '♭7' }; }
+    else if (eat(/^°/)) { third = { semi: 3, step: 2, label: '♭3' }; fifth = { semi: 6, step: 4, label: '♭5' }; if (eat(/^7/)) seventh = { semi: 9, step: 6, label: '𝄫7' }; }
+    else if (eat(/^\+/)) { fifth = { semi: 8, step: 4, label: '♯5' }; }
+    else if ((m = eat(/^(?:maj|M|Δ)(13|11|9|7)?/))) { if (m[1]) { seventh = { semi: 11, step: 6, label: '7' }; upper(+m[1]); } }
+    else if (eat(/^(?:min|m|-)/)) { third = { semi: 3, step: 2, label: '♭3' }; }
+    if (!seventh && (m = eat(/^(?:maj|M|Δ)(13|11|9|7)/))) { seventh = { semi: 11, step: 6, label: '7' }; upper(+m[1]); }
+    else if (!seventh && (m = eat(/^(13|11|9|7)/))) { seventh = { semi: 10, step: 6, label: '♭7' }; upper(+m[1]); }
+    else if ((m = eat(/^6(?:\/?9)?/))) { ext.push(tone(6)); if (m[0].includes('9')) ext.push(tone(9)); }
+    else if (eat(/^5$/)) power = true;
+    else if (eat(/^2(?!\d)/)) ext.push(tone(2));
+    let guard = 0;
+    while (s && guard++ < 20) {
+      if (eat(/^sus2/)) { third = { semi: 2, step: 1, label: '2' }; continue; }
+      if (eat(/^sus4?/)) { third = { semi: 5, step: 3, label: '4' }; continue; }
+      if (eat(/^\+/)) { fifth = { semi: 8, step: 4, label: '♯5' }; continue; }
+      if ((m = eat(/^(?:maj|M|Δ)7/))) { seventh = { semi: 11, step: 6, label: '7' }; continue; }
+      if ((m = eat(/^add([b#]?)(\d+)/))) { const t = tone(+m[2], m[1]); if (t) ext.push(t); continue; }
+      if ((m = eat(/^([b#])(\d+)/))) {
+        const n = +m[2];
+        if (n === 5) fifth = { semi: m[1] === 'b' ? 6 : 8, step: 4, label: prettyAcc(m[1]) + '5' };
+        else { const t = tone(n, m[1]); if (t) ext.push(t); }
+        continue;
+      }
+      if ((m = eat(/^(\d+)/))) {
+        const n = +m[1];
+        if (n === 7 && !seventh) seventh = { semi: 10, step: 6, label: '♭7' };
+        else { const t = tone(n); if (t) ext.push(t); }
+        continue;
+      }
+      s = s.slice(1);
+    }
+    const out = [{ semi: 0, step: 0, label: '1' }];
+    if (!power) out.push(third);
+    out.push(fifth);
+    if (seventh) out.push(seventh);
+    for (const e of ext) if (e && !out.some((x) => x.semi % 12 === e.semi % 12)) out.push(e);
+    return out;
+  }
+
+  function qualityName(q) {
+    const n = normTok(q).replace(/[()\s]/g, '');
+    const names = {
+      '': 'major', m: 'minor', min: 'minor', '-': 'minor', '°': 'diminished', '+': 'augmented', ø: 'half-diminished', ø7: 'half-diminished',
+      m7b5: 'half-diminished', 7: 'dominant 7th', m7: 'minor 7th', maj7: 'major 7th', M7: 'major 7th', '°7': 'diminished 7th',
+      sus: 'suspended 4th', sus4: 'suspended 4th', sus2: 'suspended 2nd', 5: 'power chord', 6: 'major 6th', m6: 'minor 6th',
+      9: 'dominant 9th', m9: 'minor 9th', maj9: 'major 9th', add9: 'add 9', 2: 'add 2', '7sus4': '7 suspended 4th',
+    };
+    return names[n] || prettyQual(n);
+  }
+
+  /** Spell a chord in a key: letters with proper sharps/flats, plus degree and sol-fa for each note. */
+  function spellChord(tok, songKey, viewKey) {
+    const p = parseAny(tok, songKey);
+    const k = keyInfo(viewKey) || keyInfo(songKey) || keyInfo('C');
+    if (!p) return null;
+    const rootSemi = (k.semi + numSemi(p.acc, p.deg)) % 12;
+    const flat = p.acc === 'b' || (p.acc !== '#' && k.flat);
+    const rootName = (flat ? FLATS : SHARPS)[rootSemi];
+    const rootLetter = LETTERS.indexOf(rootName[0]);
+    const notes = chordTones(p.qual).map((t) => {
+      const letter = LETTERS[(rootLetter + t.step) % 7];
+      const target = (rootSemi + t.semi) % 12;
+      const diff = ((target - NOTE_SEMI[letter] + 18) % 12) - 6;
+      const rel = (target - k.semi + 12) % 12;
+      return { name: letter + (ACC_SIGN[diff] ?? ''), semi: target, interval: t.semi, label: t.label, degree: SEMI_DEGREE[rel], solfa: SOLFA_SEMI[rel] };
+    });
+    let bass = null;
+    if (p.bass) {
+      const bs = (k.semi + numSemi(p.bass.acc, p.bass.deg)) % 12;
+      const inChord = notes.find((n) => n.semi === bs);
+      const rel = (bs - k.semi + 12) % 12;
+      bass = { name: inChord ? inChord.name : (p.bass.acc === 'b' || (p.bass.acc !== '#' && k.flat) ? FLATS : SHARPS)[bs], semi: bs, degree: SEMI_DEGREE[rel], solfa: SOLFA_SEMI[rel] };
+    }
+    return { p, key: k, rootName, rootSemi, name: `${rootName} ${qualityName(p.qual)}`, notes, bass };
+  }
+
+  /** Small piano with the chord's notes lit up (bass note in its own colour, an octave below). */
+  function pianoSVG(sp) {
+    const lit = new Map();
+    const start = sp.bass ? 12 : 0;
+    if (sp.bass) lit.set(sp.bass.semi, 'bass');
+    sp.notes.forEach((n, i) => {
+      let abs = start + sp.rootSemi + (n.interval % 12);
+      if (i > 0 && abs <= start + sp.rootSemi) abs += 12;
+      if (!lit.has(abs)) lit.set(abs, i === 0 ? 'root' : 'tone');
+    });
+    const maxAbs = Math.max(...lit.keys());
+    const octaves = Math.max(2, Math.ceil((maxAbs + 1) / 12));
+    const WHITE = [0, 2, 4, 5, 7, 9, 11], BLACK = { 1: 0, 3: 1, 6: 3, 8: 4, 10: 5 };
+    const ww = 24, wh = 96, bw = 15, bh = 60, W = ww * 7 * octaves;
+    let whites = '', blacks = '';
+    for (let o = 0; o < octaves; o++) {
+      WHITE.forEach((sm, i) => {
+        const abs = o * 12 + sm, c = lit.get(abs), x = (o * 7 + i) * ww;
+        whites += `<rect x="${x + 0.5}" y="0.5" width="${ww - 1}" height="${wh}" rx="4" class="pk w ${c || ''}"/>`;
+        if (c) whites += `<circle cx="${x + ww / 2}" cy="${wh - 14}" r="5" class="pd ${c}"/>`;
+      });
+      for (const [sm, i] of Object.entries(BLACK)) {
+        const abs = o * 12 + +sm, c = lit.get(abs), x = (o * 7 + i + 1) * ww - bw / 2;
+        blacks += `<rect x="${x}" y="0.5" width="${bw}" height="${bh}" rx="3" class="pk b ${c || ''}"/>`;
+      }
+    }
+    return `<svg class="piano" viewBox="0 0 ${W + 1} ${wh + 1}" role="img" aria-label="Piano showing ${esc(sp.notes.map((n) => n.name).join(', '))}">${whites}${blacks}</svg>`;
   }
 
   /* ================= chart parsing ================= */
@@ -246,7 +389,7 @@
       const words = s.text.match(/^\S*\s*|\S+\s*/g) || [''];
       words.forEach((w, k) => {
         const c = k === 0 && s.chord !== null
-          ? `<span class="c">${s.chord.split(/\s+/).map((t) => chordHTML(t, o)).join(' ')}</span>` : '';
+          ? `<span class="c">${s.chord.split(/\s+/).map((t) => chordBtn(t, o)).join(' ')}</span>` : '';
         html += `<span class="sg">${c}<span class="l">${esc(w)}</span></span>`;
       });
     }
@@ -283,7 +426,7 @@
         for (const t of c.trim().split(/\s+/)) {
           if (!isChordTok(t)) continue;
           const h = chordHTML(t, o);
-          if (!seen.has(h)) { seen.add(h); out.push(h); }
+          if (!seen.has(h)) { seen.add(h); out.push(`<b class="ch" data-ch="${esc(t)}">${h}</b>`); }
         }
         return m;
       });
@@ -293,11 +436,10 @@
 
   /** On save: letter chords (G, C/E, Em) become numbers in the song's key, keeping chord-line columns. */
   function convertLetters(text, key) {
-    if (!keyInfo(key)) return { text, changed: 0 };
     let changed = 0;
     const conv = (t) => {
-      if (!parseNum(t) && parseLetter(t)) { changed++; return letterToNumber(t, key); }
-      return t;
+      if (!parseNum(t) && parseLetter(t) && keyInfo(key)) { changed++; return letterToNumber(symbolizeTok(t), key); }
+      return isChordTok(t) ? symbolizeTok(t) : t;
     };
     const out = String(text).split('\n').map((line) => {
       if (isChordLine(line)) {
@@ -317,7 +459,7 @@
   const stripChords = (t) => String(t || '').replace(/\[[^\]]*\]/g, '');
 
   /* ================= shell ================= */
-  const state = { route: null, query: '', tag: null, song: null, set: null, setIdx: 0, viewKey: null, viewKeyFor: null, scrollMode: false, wake: null };
+  const state = { route: null, query: '', tag: null, selecting: false, selected: new Set(), visible: [], song: null, set: null, setIdx: 0, viewKey: null, viewKeyFor: null, scrollMode: false, wake: null };
 
   $('#app').innerHTML = `
     <aside class="side" id="side"></aside>
@@ -392,6 +534,7 @@
     document.body.classList.toggle('focus', r.name === 'song' || r.name === 'edit');
     document.body.classList.remove('bass', 'lyrics');
     renderNav();
+    if (r.name !== 'songs') { state.selecting = false; state.selected = new Set(); $('#selbar')?.remove(); }
     if (r.name === 'songs') viewSongs(r.fav);
     else if (r.name === 'sets') viewSets();
     else if (r.name === 'set') viewSet(r.id);
@@ -410,8 +553,9 @@
     return [...set.values()].sort((a, b) => a.localeCompare(b));
   }
 
-  function songCard(s) {
-    return `<a class="song-card" href="#/s/${enc(s.id)}" style="--h:${hueOf(s.title)}">
+  function songCard(s, picked) {
+    return `<a class="song-card${picked ? ' picked' : ''}" href="#/s/${enc(s.id)}" data-id="${esc(s.id)}" style="--h:${hueOf(s.title)}">
+      <span class="pick">${icon('check')}</span>
       <span class="av">${esc(prettyKey(s.key) || '—')}</span>
       <span class="sc-body">
         <span class="sc-title">${esc(s.title)}</span>
@@ -431,6 +575,7 @@
       <header class="topbar">
         <div class="tb-title"><h1>${fav ? 'Favorites' : 'Songs'}</h1><p class="sub" id="count"></p></div>
         <div class="tb-actions">
+          <button class="btn ghost${state.selecting ? ' on' : ''}" data-act="select" title="Select songs to delete">${icon(state.selecting ? 'x' : 'check')}<span class="hide-sm">${state.selecting ? 'Done' : 'Select'}</span></button>
           <button class="btn ghost" data-act="import" title="Import songs">${icon('download')}<span class="hide-sm">Import</span></button>
           <button class="btn ghost" data-act="share-lib" title="Share library">${icon('share')}<span class="hide-sm">Share</span></button>
           <a class="btn primary" href="#/new">${icon('plus')}<span>New</span></a>
@@ -453,6 +598,16 @@
       </div>`;
     const q = $('#q');
     q.addEventListener('input', () => { state.query = q.value; fillList(fav); });
+    $('#list').addEventListener('click', (e) => {
+      if (!state.selecting) return;
+      const c = e.target.closest('.song-card');
+      if (!c) return;
+      e.preventDefault();
+      const id = c.dataset.id;
+      state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id);
+      c.classList.toggle('picked', state.selected.has(id));
+      drawSelectBar();
+    });
     $('#sort').addEventListener('change', (e) => { prefs.sort = e.target.value; savePrefs(); fillList(fav); });
     $('#chips').addEventListener('click', (e) => {
       const c = e.target.closest('[data-tag]');
@@ -478,9 +633,43 @@
       .filter((s) => !q || `${s.title} ${s.artist} ${(s.tags || []).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
       .sort(sorters[prefs.sort] || sorters.title);
     $('#count').textContent = `${list.length === base.length ? '' : list.length + ' of '}${base.length} song${base.length === 1 ? '' : 's'}`;
-    $('#list').innerHTML = list.map(songCard).join('') || (fav && !base.length
+    state.visible = list.map((s) => s.id);
+    $('#list').classList.toggle('selecting', !!state.selecting);
+    $('#list').innerHTML = list.map((s) => songCard(s, state.selecting && state.selected.has(s.id))).join('') || (fav && !base.length
       ? emptyState('star', 'No favorites yet', 'Tap the star on any song to keep it here for quick access.', '<a class="btn soft" href="#/">Browse songs</a>')
       : emptyState('search', 'No songs found', songs.length ? 'Try a different search or filter.' : 'Add your first song to get started.', '<a class="btn primary" href="#/new">' + icon('plus') + 'New song</a>'));
+    drawSelectBar();
+  }
+
+  function drawSelectBar() {
+    let bar = $('#selbar');
+    if (!state.selecting) { bar?.remove(); return; }
+    if (!bar) { bar = document.createElement('div'); bar.id = 'selbar'; bar.className = 'selbar'; main.append(bar); }
+    const n = state.selected.size;
+    bar.innerHTML = `<span><b>${n}</b> selected</span>
+      <button class="btn ghost" data-act="select-all">${state.visible.length && state.visible.every((id) => state.selected.has(id)) ? 'Clear' : 'Select all'}</button>
+      <button class="btn danger-fill" data-act="delete-selected" ${n ? '' : 'disabled'}>${icon('trash')}Delete</button>`;
+  }
+
+  /** Delete songs (after asking), removing them from favorites, recents and setlists. Offers Undo. */
+  function confirmDelete(ids) {
+    const list = ids.map(byId).filter(Boolean);
+    if (!list.length) return false;
+    const what = list.length === 1 ? `“${list[0].title}”` : `${list.length} songs`;
+    if (!confirm(`Delete ${what} from your library?`)) return false;
+    const snap = { songs: [...songs], setlists: JSON.parse(JSON.stringify(setlists)), favs: [...prefs.favs], recent: [...prefs.recent] };
+    const gone = new Set(ids);
+    songs = songs.filter((s) => !gone.has(s.id));
+    prefs.favs = prefs.favs.filter((x) => !gone.has(x));
+    prefs.recent = prefs.recent.filter((x) => !gone.has(x));
+    for (const st of setlists) st.items = st.items.filter((i) => !gone.has(i.songId));
+    saveLibrary(); saveSets(); savePrefs(); renderNav();
+    toast(`Deleted ${what}`, 'Undo', () => {
+      songs = snap.songs; setlists = snap.setlists; prefs.favs = snap.favs; prefs.recent = snap.recent;
+      saveLibrary(); saveSets(); savePrefs(); route();
+      toast('Restored');
+    });
+    return true;
   }
 
   const emptyState = (ic, title, text, action = '') =>
@@ -530,6 +719,7 @@
           <button class="btn ghost icon-only" data-act="add-to-set" title="Add to setlist">${icon('listPlus')}</button>
           <button class="btn ghost icon-only" data-act="share-song" title="Share song">${icon('share')}</button>
           <button class="btn ghost icon-only hide-sm" data-act="print" title="Print">${icon('printer')}</button>
+          <button class="btn ghost icon-only danger" data-act="delete-song" title="Delete song">${icon('trash')}</button>
           <a class="btn soft" href="#/e/${enc(s.id)}">${icon('edit')}<span class="hide-sm">Edit</span></a>
         </div>
       </header>
@@ -803,6 +993,12 @@
 
   /* ================= global click actions ================= */
   main.addEventListener('click', (e) => {
+    const ch = e.target.closest('.ch');
+    if (ch && state.route && (state.route.name === 'song' || state.route.name === 'edit')) {
+      if (state.route.name === 'song') openChord(ch.dataset.ch, state.song.key, viewOpts(state.song).viewKey);
+      else { const k = $('#f').key.value; openChord(ch.dataset.ch, k, k); }
+      return;
+    }
     const b = e.target.closest('[data-act],[data-mode],[data-part],[data-size],[data-theme-set]');
     if (!b) return;
     const s = state.song;
@@ -813,6 +1009,22 @@
     if (b.dataset.themeSet) { prefs.theme = b.dataset.themeSet; savePrefs(); applyTheme(); viewSettings(); return; }
     switch (b.dataset.act) {
       case 'import': openImport(); break;
+      case 'select':
+        state.selecting = !state.selecting; state.selected = new Set();
+        viewSongs(state.route.fav); break;
+      case 'select-all': {
+        const all = state.visible.every((id) => state.selected.has(id));
+        state.selected = all ? new Set() : new Set(state.visible);
+        fillList(state.route.fav); break;
+      }
+      case 'delete-selected':
+        if (confirmDelete([...state.selected])) { state.selecting = false; state.selected = new Set(); viewSongs(state.route.fav); }
+        break;
+      case 'delete-song': {
+        const back = state.set ? '#/set/' + enc(state.set.id) : '#/';
+        if (confirmDelete([s.id])) go(back);
+        break;
+      }
       case 'share-lib': openShare(songs, 'your library', setlists); break;
       case 'fav': toggleFav(s); break;
       case 'add-to-set': openAddToSet(s); break;
@@ -1066,6 +1278,7 @@
             <div class="chordbar" id="cbar">
               ${CHORD_BUTTONS.map((c) => `<button type="button" data-ins="[${esc(c)}]">${esc(c.replace(/^b/, '♭').replace('/b', '/♭'))}</button>`).join('')}
               <button type="button" data-ins="[]" data-back="1">[ ]</button>
+              ${['♭', '♯', 'm', '7', '+', '°', '/'].map((x) => `<button type="button" class="symb" data-ins="${x}" title="Type ${x}">${x}</button>`).join('')}
               ${['Verse', 'Chorus', 'Bridge'].map((x) => `<button type="button" class="secb" data-ins="\n${x}\n">${x}</button>`).join('')}
             </div>
             <textarea id="chartInput" spellcheck="false" autocapitalize="sentences" placeholder="Verse 1&#10;[1]Jesus is the [7]answer&#10;&#10;— or put the chords on the line above —&#10;&#10;1                   7&#10;Jesus is the answer">${esc(s.chart)}</textarea>
@@ -1083,7 +1296,9 @@ for the world to[6]day [b7/5]</pre>
           <p><b>Option 2: chords above.</b> Type the chords on their own line and line them up with spaces over the lyric (the box uses fixed-width letters so it lines up):</p>
           <pre>1                   7
 Jesus is the answer</pre>
-          <p><b>Numbers:</b> <code>1</code>–<code>7</code>. Add <code>m</code> for minor (<code>6m</code>), plus anything like <code>7</code>, <code>maj7</code>, <code>sus4</code>, <code>°</code>, <code>add9</code>. Flats and sharps go in front: <code>b7</code>, <code>#4</code>.</p>
+          <p><b>Numbers:</b> <code>1</code>–<code>7</code>. Add <code>m</code> for minor (<code>6m</code>), plus anything like <code>7</code>, <code>maj7</code>, <code>sus4</code>, <code>°</code>, <code>add9</code>. Flats and sharps can go before or after the number: <code>♭7</code>, <code>6♭</code>, <code>5♯</code>, <code>♯4</code>. Type the word <code>flat</code> or <code>sharp</code> (or <code>b</code> / <code>#</code>) and it turns into ♭ / ♯.</p>
+          <p><b>Augmented &amp; diminished:</b> type <code>aug</code> or <code>+</code> (<code>1+</code>), and <code>dim</code> or <code>°</code> (<code>2°</code>, <code>7°7</code>). Half-diminished: <code>ø</code> or <code>m7b5</code>.</p>
+          <p><b>Tap any chord</b> on a song to see the notes in it, on a keyboard, with their numbers and sol-fa.</p>
           <p><b>Slash chords:</b> <code>1/5</code> means 1 over 5 in the bass. Keys see <code>1/5</code>; bass sees just <code>5</code>.</p>
           <p><b>Letter chords</b> like <code>G</code>, <code>C/E</code>, <code>Em</code> are fine too. They're turned into numbers using the song's key when you save.</p>
           <p><b>Sections:</b> put <code>Verse 1</code>, <code>Chorus</code>, <code>Bridge</code>… on their own line, or anything in braces like <code>{Vamp}</code>. Each gets its own colour. Lines starting with <code>#</code> are small notes.</p>
@@ -1096,7 +1311,25 @@ Jesus is the answer</pre>
       pv.innerHTML = renderChart(ta.value, { mode: prefs.mode, part: prefs.part, songKey: key, viewKey: key })
         || '<p class="sub">Your chart will show here as you type.</p>';
     };
-    ta.addEventListener('input', draw);
+    // Typing "flat" or "sharp" inside a chord turns into ♭ / ♯ straight away (lyrics are left alone).
+    ta.addEventListener('input', () => {
+      const before = ta.value;
+      if (/flat|sharp/i.test(before)) {
+        const after = before.split('\n').map((line) => {
+          if (isChordLine(line)) {
+            // keep each chord in the same column so it stays over the right word
+            return line.replace(/\S+/g, (t) => { const n = isChordTok(t) ? symbolizeTok(t) : t; return n + ' '.repeat(t.length - n.length); });
+          }
+          return line.replace(/\[([^\]]*)\]/g, (m, c) => '[' + symbolizeTok(c) + ']');
+        }).join('\n');
+        if (after !== before) {
+          const pos = ta.selectionStart + (after.length - before.length);
+          ta.value = after;
+          ta.setSelectionRange(pos, pos);
+        }
+      }
+      draw();
+    });
     f.key.addEventListener('change', draw);
     draw();
 
@@ -1164,13 +1397,7 @@ Jesus is the answer</pre>
       go('#/s/' + enc(sid));
     });
     $('#del')?.addEventListener('click', () => {
-      if (!confirm(`Delete “${existing.title}” from your library?`)) return;
-      songs = songs.filter((x) => x !== existing);
-      prefs.favs = prefs.favs.filter((x) => x !== existing.id);
-      prefs.recent = prefs.recent.filter((x) => x !== existing.id);
-      saveLibrary(); savePrefs();
-      toast('Song deleted');
-      go('#/');
+      if (confirmDelete([existing.id])) go('#/');
     });
   }
 
@@ -1275,9 +1502,9 @@ Jesus is the answer</pre>
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  function modal(html) {
+  function modal(html, cls = '') {
     const d = document.createElement('dialog');
-    d.className = 'modal';
+    d.className = 'modal ' + cls;
     d.innerHTML = html;
     document.body.append(d);
     d.addEventListener('close', () => d.remove());
@@ -1432,12 +1659,39 @@ Jesus is the answer</pre>
 
   /* ================= misc ================= */
   let toastTimer;
-  function toast(msg) {
+  function toast(msg, actionLabel, action) {
     const t = $('#toast');
     t.textContent = msg;
+    t.classList.toggle('has-action', !!action);
+    if (action) {
+      const b = document.createElement('button');
+      b.textContent = actionLabel;
+      b.addEventListener('click', () => { t.classList.remove('show'); action(); }, { once: true });
+      t.append(b);
+    }
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+    toastTimer = setTimeout(() => t.classList.remove('show'), action ? 6000 : 2800);
+  }
+
+  /* ---------- chord sheet: tap a chord to see its notes ---------- */
+  const prettyDeg = (d) => d.replace(/^b/, '♭').replace(/^#/, '♯');
+  function openChord(tok, songKey, viewKey) {
+    const sp = spellChord(tok, songKey, viewKey);
+    if (!sp) return;
+    const o = { mode: prefs.mode, part: 'keys', songKey, viewKey };
+    const keyName = prettyKey(viewKey || songKey || 'C');
+    modal(`
+      <div class="chord-head">
+        <div class="chord-big">${chordHTML(tok, o)}</div>
+        <div><h2>${esc(sp.name)}${sp.bass ? ` <span class="over">over ${esc(sp.bass.name)}</span>` : ''}</h2><p>Key of ${esc(keyName)} · ${sp.notes.length} notes</p></div>
+      </div>
+      ${pianoSVG(sp)}
+      <div class="notes">${sp.notes.map((n, i) => `
+        <div class="note-chip${i === 0 ? ' root' : ''}"><b>${esc(n.name)}</b><span>${esc(prettyDeg(n.degree))} · ${esc(n.solfa)}</span><small>${i === 0 ? 'root' : esc(n.label)}</small></div>`).join('')}
+      </div>
+      ${sp.bass ? `<div class="bass-line"><i></i>Bass plays <b>${esc(sp.bass.name)}</b> &nbsp;(${esc(prettyDeg(sp.bass.degree))} · ${esc(sp.bass.solfa)})</div>` : ''}
+      <div class="row"><form method="dialog"><button class="btn primary">Done</button></form></div>`, 'sheet');
   }
 
   // Keep the screen awake while a song is open (phones on a music stand).

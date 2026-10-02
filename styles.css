@@ -475,3 +475,70 @@ dialog.modal textarea { width: 100%; font: 14px/1.4 ui-monospace, Menlo, monospa
   .controls > * { flex: none; }
   .seg button { padding: 6px 10px; }
 }
+
+/* ============ tappable chords ============ */
+.chart .ch, .used .ch { cursor: pointer; border-radius: 6px; transition: background .12s; }
+.chart .ch:hover { background: color-mix(in srgb, var(--chord) 14%, transparent); }
+body.bass .chart .ch:hover { background: color-mix(in srgb, var(--bass) 14%, transparent); }
+.chart .ch:active, .used .ch:active { transform: scale(.94); }
+.used .ch:hover { filter: brightness(1.08); }
+
+/* ============ chord sheet ============ */
+dialog.sheet { width: min(500px, calc(100vw - 24px)); }
+@media (max-width: 600px) {
+  dialog.sheet { margin: auto 0 0; width: 100vw; max-width: 100vw; border-radius: 24px 24px 0 0; padding-bottom: calc(22px + env(safe-area-inset-bottom)); border-bottom: 0; }
+  dialog.sheet[open] { animation: up .26s cubic-bezier(.2, .9, .3, 1); }
+  @keyframes up { from { transform: translateY(60%); opacity: .4; } }
+}
+.chord-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.chord-big {
+  min-width: 64px; height: 64px; padding: 0 14px; border-radius: 18px; display: grid; place-items: center;
+  background: var(--grad); color: #fff; font-size: 26px; font-weight: 800; white-space: nowrap; box-shadow: 0 8px 22px rgb(140 60 240 / .35);
+}
+.chord-big .q { font-size: .62em; }
+.chord-head h2 { margin: 0 0 2px !important; }
+.chord-head .over { font-size: .7em; color: var(--muted); font-weight: 700; }
+.chord-head p { margin: 0 !important; }
+.piano { width: 100%; height: auto; display: block; margin: 0 0 14px; }
+.pk.w { fill: #fff; stroke: #c9c5da; stroke-width: 1; }
+.pk.b { fill: #1f1b33; }
+.pk.root { fill: #ff8a3d; } .pk.tone { fill: #8f7bff; } .pk.bass { fill: #22c3e6; }
+.pk.w.root { fill: #ffd9bf; } .pk.w.tone { fill: #ddd6ff; } .pk.w.bass { fill: #c4f1fb; }
+.pd.root { fill: #ff6a1a; } .pd.tone { fill: #6d4aff; } .pd.bass { fill: #0aa5c8; }
+:root[data-theme="dark"] .pk.w { stroke: #3a3558; }
+.notes { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.note-chip { display: flex; flex-direction: column; align-items: center; padding: 10px 6px; border-radius: 14px; background: var(--primary-soft); color: var(--primary); }
+.note-chip b { font-size: 24px; font-weight: 800; line-height: 1.1; color: var(--text); }
+.note-chip span { font-size: 13px; font-weight: 750; }
+.note-chip small { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.note-chip.root { background: color-mix(in srgb, var(--chord) 15%, transparent); color: var(--chord); }
+.bass-line { display: flex; align-items: center; gap: 8px; font-size: 14.5px; color: var(--muted); margin: -4px 0 14px; }
+.bass-line i { width: 12px; height: 12px; border-radius: 50%; background: #22c3e6; }
+.bass-line b { color: var(--text); }
+
+/* ============ select & delete ============ */
+.song-card { position: relative; }
+.song-card .pick { display: none; }
+.song-grid.selecting .song-card .pick {
+  display: grid; place-items: center; position: absolute; top: 10px; left: 10px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--line); color: transparent; z-index: 1;
+}
+.song-grid.selecting .song-card .pick .ic { width: 14px; height: 14px; stroke-width: 3; }
+.song-grid.selecting .song-card.picked { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
+.song-grid.selecting .song-card.picked .pick { background: var(--danger); border-color: var(--danger); color: #fff; }
+.selbar {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 35;
+  display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 18px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lg); white-space: nowrap;
+}
+@media (min-width: 960px) { .selbar { bottom: 24px; left: calc(50% + var(--side) / 2); } }
+.btn.danger-fill { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn.danger.icon-only:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+#toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 14px; }
+#toast button { appearance: none; border: 0; background: none; color: #c9b8ff; font-weight: 800; font-size: 14.5px; cursor: pointer; padding: 0; }
+.chordbar button.symb { color: var(--text); background: var(--surface-2); min-width: 36px; }
+@media (max-width: 430px) {
+  .topbar > a.btn.ghost:first-child span { display: none; }
+  .topbar .tb-actions { gap: 2px; }
+  .topbar .btn.icon-only { width: 38px; }
+}

@@ -19,7 +19,9 @@ Each device keeps its own library in the browser. Use **Share** to move songs be
 ## Features
 
 - Songs with key, tempo, time signature, tags and notes. You can search, filter by tag, sort, and mark favourites.
-- Chords as numbers, solfa (do re mi) or letters, with a transpose picker.
+- Chords as numbers, sol-fa (do de re ma mi fa fi so zi la ta ti) or letters, with a transpose picker.
+- Tap any chord to see its notes on a keyboard, with numbers and sol-fa.
+- Delete a song from its page, or tap Select in the library to delete several at once (with Undo).
 - Keys, Bass (bass note only) or Lyrics-only view.
 - Setlists with a date, notes and a key per song. Swipe or use the ←/→ keys to move between songs.
 - Stage mode (full screen, big text), autoscroll, and a metronome with a click or a flash only.
@@ -33,7 +35,7 @@ Keyboard: Space = scroll, ←/→ = next/previous song in a setlist, M = metrono
 
 - Inline: `[1]Jesus is the [7]answer`
 - Or chords on the line above, lined up with spaces
-- Numbers `1`–`7`, with `m`, `7`, `sus4`, `°` and so on. Put accidentals in front (`b7`), and use a slash for the bass note (`1/5`, `b7/5`).
+- Numbers `1`–`7`, with `m`, `7`, `sus4`, `+`/`aug`, `°`/`dim` and so on. Flats and sharps go before or after the number (`♭7`, `6♭`, `5♯`). Typing `flat` or `sharp` turns into ♭ / ♯. Use a slash for the bass note (`1/5`, `♭7/5`).
 - Letter chords (`G`, `C/E`) are converted to numbers using the song key when you save.
 - Section lines: `Verse 1`, `Chorus`, `Bridge`, `{Anything}`. A line starting with `#` is a note.
 
