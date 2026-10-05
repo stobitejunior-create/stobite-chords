@@ -28,6 +28,7 @@
     down: '<path d="m6 9 6 6 6-6"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
     trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
@@ -50,6 +51,7 @@
   const LIB_KEY = 'stobite-chords:library';
   const SET_KEY = 'stobite-chords:setlists';
   const PREF_KEY = 'stobite-chords:prefs';
+  const TEAM_KEY = 'stobite-chords:team';
 
   function readJSON(key, fallback) {
     try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
@@ -58,22 +60,37 @@
     try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { toast('Could not save on this device (storage blocked or full)'); return false; }
   }
 
+  // The library is either personal (this device only) or a team's (synced through Supabase).
+  // A team's songs are cached on the device too, so everything works offline.
+  let team = readJSON(TEAM_KEY, null); // { id, name, code, role, myName }
+  const spaceKey = (k) => `stobite-chords:team:${team.id}:${k}`;
+  const libKey = () => (team ? spaceKey('songs') : LIB_KEY);
+  const setKey = () => (team ? spaceKey('setlists') : SET_KEY);
+  const syncedKey = () => spaceKey('synced');
+  const sync = { client: null, channel: null, status: 'off', detail: '', timer: 0, pushing: false, again: false, members: [], userId: null, pendingRefresh: false };
+  let synced = { songs: {}, sets: {} }; // what the server has: id -> { u: updated, d: deleted }
+
   const starterById = Object.fromEntries(STARTER_SONGS.map((s) => [s.id, s]));
-  let songs = readJSON(LIB_KEY, null);
-  if (!Array.isArray(songs)) songs = STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] }));
-  for (const s of songs) {
-    if (!Array.isArray(s.tags)) s.tags = !s.updated && starterById[s.id] ? [...starterById[s.id].tags] : [];
+  let songs = [], setlists = [];
+  function loadSpace() {
+    songs = readJSON(libKey(), null);
+    if (!Array.isArray(songs)) songs = team ? [] : STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] }));
+    for (const s of songs) {
+      if (!Array.isArray(s.tags)) s.tags = !s.updated && starterById[s.id] ? [...starterById[s.id].tags] : [];
+    }
+    setlists = readJSON(setKey(), []);
+    if (!Array.isArray(setlists)) setlists = [];
+    synced = team ? readJSON(syncedKey(), { songs: {}, sets: {} }) : { songs: {}, sets: {} };
   }
-  let setlists = readJSON(SET_KEY, []);
-  if (!Array.isArray(setlists)) setlists = [];
+  loadSpace();
   const prefs = Object.assign(
     { mode: 'numbers', part: 'keys', size: 20, theme: 'auto', favs: [], recent: [], metroSound: true, sort: 'title', scrollSpeed: 3 },
     readJSON(PREF_KEY, {}),
   );
-  saveLibrary();
+  writeJSON(libKey(), songs);
 
-  function saveLibrary() { return writeJSON(LIB_KEY, songs); }
-  function saveSets() { return writeJSON(SET_KEY, setlists); }
+  function saveLibrary() { const ok = writeJSON(libKey(), songs); scheduleSync(); return ok; }
+  function saveSets() { const ok = writeJSON(setKey(), setlists); scheduleSync(); return ok; }
   function savePrefs() { writeJSON(PREF_KEY, prefs); }
   const byId = (id) => songs.find((s) => s.id === id);
   const setById = (id) => setlists.find((s) => s.id === id);
@@ -494,7 +511,7 @@
       <a class="btn primary new" href="#/new">${icon('plus')}New song</a>
       <nav class="nav">${NAV.map((n) => `<a href="${n.href}" class="${n.key === active ? 'on' : ''}">${icon(n.icon)}${n.label}${counts[n.key] != null ? `<span class="n">${counts[n.key]}</span>` : ''}</a>`).join('')}</nav>
       ${recentSets.length ? `<div class="side-h">Setlists</div><div class="side-sets">${recentSets.map((s) => `<a href="#/set/${enc(s.id)}" style="--h:${hueOf(s.id)}"><i></i><span>${esc(s.name)}</span></a>`).join('')}</div>` : ''}
-      <div class="side-foot">Songs are saved on this device. Share your library to back it up.</div>`;
+      <a class="side-foot sync-pill" href="#/settings" data-sync>${syncPill()}</a>`;
     $('#tabs').innerHTML = NAV.map((n) => `<a href="${n.href}" class="${n.key === active ? 'on' : ''}">${icon(n.icon)}${n.label}</a>`).join('');
   }
 
@@ -511,6 +528,7 @@
   function parseRoute() {
     const h = location.hash || '#/';
     if (h.startsWith('#import=')) return { name: 'import', code: h.slice(8) };
+    if (h.startsWith('#join=')) return { name: 'join', code: decodeURIComponent(h.slice(6)) };
     const p = h.replace(/^#\/?/, '').split('/').map((x) => decodeURIComponent(x));
     switch (p[0]) {
       case 'favorites': return { name: 'songs', fav: true };
@@ -527,6 +545,14 @@
   function route() {
     const r = parseRoute();
     if (r.name === 'import') { handleIncomingLink(r.code); return; }
+    if (r.name === 'join') {
+      history.replaceState(null, '', location.pathname + location.search + '#/');
+      route();
+      if (team && team.code === r.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase()) toast(`You're already in ${team.name}`);
+      else if (!cloudReady()) toast('Team sync isn’t switched on in this copy of the app');
+      else openJoinTeam(r.code);
+      return;
+    }
     state.route = r;
     stopScroll(true);
     toggleMetro(false);
@@ -573,7 +599,7 @@
     if (state.tag && !tags.includes(state.tag)) state.tag = null;
     main.innerHTML = `
       <header class="topbar">
-        <div class="tb-title"><h1>${fav ? 'Favorites' : 'Songs'}</h1><p class="sub" id="count"></p></div>
+        <div class="tb-title"><h1>${fav ? 'Favorites' : 'Songs'}</h1><p class="sub"><span id="count"></span>${team ? ` · <a class="sync-pill inline" href="#/settings" data-sync>${syncPill()}</a>` : ''}</p></div>
         <div class="tb-actions">
           <button class="btn ghost${state.selecting ? ' on' : ''}" data-act="select" title="Select songs to delete">${icon(state.selecting ? 'x' : 'check')}<span class="hide-sm">${state.selecting ? 'Done' : 'Select'}</span></button>
           <button class="btn ghost" data-act="import" title="Import songs">${icon('download')}<span class="hide-sm">Import</span></button>
@@ -656,16 +682,24 @@
     const list = ids.map(byId).filter(Boolean);
     if (!list.length) return false;
     const what = list.length === 1 ? `“${list[0].title}”` : `${list.length} songs`;
-    if (!confirm(`Delete ${what} from your library?`)) return false;
+    if (!confirm(team ? `Delete ${what} for everyone in ${team.name}?` : `Delete ${what} from your library?`)) return false;
     const snap = { songs: [...songs], setlists: JSON.parse(JSON.stringify(setlists)), favs: [...prefs.favs], recent: [...prefs.recent] };
     const gone = new Set(ids);
     songs = songs.filter((s) => !gone.has(s.id));
     prefs.favs = prefs.favs.filter((x) => !gone.has(x));
     prefs.recent = prefs.recent.filter((x) => !gone.has(x));
-    for (const st of setlists) st.items = st.items.filter((i) => !gone.has(i.songId));
+    const stamp = Date.now();
+    for (const st of setlists) {
+      const n = st.items.length;
+      st.items = st.items.filter((i) => !gone.has(i.songId));
+      if (st.items.length !== n) st.updated = stamp;
+    }
     saveLibrary(); saveSets(); savePrefs(); renderNav();
     toast(`Deleted ${what}`, 'Undo', () => {
       songs = snap.songs; setlists = snap.setlists; prefs.favs = snap.favs; prefs.recent = snap.recent;
+      const now = Date.now(); // newer than the delete, so teammates get the songs back too
+      for (const x of songs) if (gone.has(x.id)) x.updated = now;
+      for (const st of setlists) if (st.items.some((i) => gone.has(i.songId))) st.updated = now;
       saveLibrary(); saveSets(); savePrefs(); route();
       toast('Restored');
     });
@@ -1408,6 +1442,7 @@ Jesus is the answer</pre>
     main.innerHTML = `
       <header class="topbar"><div class="tb-title"><h1>Settings</h1><p class="sub">Make it yours</p></div></header>
       <div class="content narrow">
+        ${teamCardHTML()}
         <section class="card"><h2>Appearance</h2>
           <div class="srow"><div><b>Theme</b><small>Follow your device, or choose one</small></div>
             ${seg('theme-set', prefs.theme, [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']])}</div>
@@ -1429,14 +1464,15 @@ Jesus is the answer</pre>
             <button class="btn" data-act="import">${icon('download')}Import</button></div>
           <div class="srow"><div><b>Starter hymns</b><small>Put back any of the included hymns you deleted</small></div>
             <button class="btn" id="restore">Restore</button></div>
-          <div class="srow"><div><b>Erase everything</b><small>Removes all songs and setlists from this device</small></div>
-            <button class="btn danger" id="wipe">${icon('trash')}Erase</button></div>
+          ${team ? '' : `<div class="srow"><div><b>Erase everything</b><small>Removes all songs and setlists from this device</small></div>
+            <button class="btn danger" id="wipe">${icon('trash')}Erase</button></div>`}
         </section>
-        <p class="about"><b>Stobite Chords</b> · Your songs stay on this device.<br>Keyboard: Space scroll · ←/→ setlist · M metronome · F stage · +/− size</p>
+        <p class="about"><b>Stobite Chords</b> · ${team ? `Songs are shared with ${esc(team.name)} and kept on this device for offline use.` : 'Your songs stay on this device.'}<br>Keyboard: Space scroll · ←/→ setlist · M metronome · F stage · +/− size</p>
       </div>`;
     $('#snd').addEventListener('click', () => { prefs.metroSound = !prefs.metroSound; savePrefs(); viewSettings(); });
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
-    $('#wipe').addEventListener('click', () => {
+    bindTeamCard();
+    $('#wipe')?.addEventListener('click', () => {
       if (!confirm('Erase ALL songs and setlists on this device? This cannot be undone. Share your library first if you want a backup.')) return;
       songs = []; setlists = []; prefs.favs = []; prefs.recent = [];
       saveLibrary(); saveSets(); savePrefs(); renderNav(); toast('Everything erased'); viewSettings();
@@ -1657,6 +1693,405 @@ Jesus is the answer</pre>
     });
   }
 
+  /* ================= team sync (Supabase) ================= */
+  const CFG = window.STOBITE_SUPABASE || {};
+  const cloudReady = () => !!(CFG.url && CFG.anonKey);
+  const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js';
+
+  function loadSupabase() {
+    if (window.supabase && window.supabase.createClient) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = SUPABASE_JS;
+      el.onload = resolve;
+      el.onerror = () => { el.remove(); reject(new Error('No internet connection')); };
+      document.head.append(el);
+    });
+  }
+
+  /** Supabase client with a signed-in (anonymous) user for this device. */
+  async function cloud() {
+    if (!cloudReady()) throw new Error('Team sync is not switched on yet');
+    if (!sync.client) {
+      await loadSupabase();
+      sync.client = window.supabase.createClient(CFG.url, CFG.anonKey, {
+        auth: { persistSession: true, autoRefreshToken: true, storageKey: 'stobite-chords:auth' },
+      });
+    }
+    const { data: { session } } = await sync.client.auth.getSession();
+    if (session) sync.userId = session.user.id;
+    else {
+      const { data, error } = await sync.client.auth.signInAnonymously();
+      if (error) throw error;
+      sync.userId = data.user.id;
+    }
+    return sync.client;
+  }
+
+  function setSync(status, detail = '') {
+    sync.status = status;
+    sync.detail = detail;
+    for (const el of $$('[data-sync]')) el.innerHTML = syncPill();
+  }
+  function syncPill() {
+    if (!team) return `<i class="dot off"></i>On this device only`;
+    const label = { synced: esc(team.name), syncing: 'Syncing…', offline: 'Offline · changes will sync', error: 'Sync problem', off: esc(team.name) }[sync.status] || esc(team.name);
+    return `<i class="dot ${sync.status}"></i>${label}`;
+  }
+
+  const songToRow = (s) => ({
+    team_id: team.id, id: s.id, title: (s.title || '').slice(0, 200), artist: (s.artist || '').slice(0, 200), key: (s.key || '').slice(0, 8),
+    tempo: Number(s.tempo) ? Math.round(Number(s.tempo)) : null, time: (s.time || '').slice(0, 8), info: s.info || '', tags: s.tags || [],
+    chart: s.chart || '', updated: s.updated || 0, deleted: false,
+  });
+  const rowToSong = (r) => ({
+    id: r.id, title: r.title, artist: r.artist, key: r.key, tempo: r.tempo ?? '', time: r.time, info: r.info, tags: r.tags || [], chart: r.chart, updated: Number(r.updated) || 0,
+  });
+  const setToRow = (st) => ({
+    team_id: team.id, id: st.id, name: (st.name || '').slice(0, 200), date: (st.date || '').slice(0, 10), notes: st.notes || '',
+    items: (st.items || []).map((i) => ({ songId: i.songId, key: i.key || '' })), updated: st.updated || 0, deleted: false,
+  });
+  const rowToSet = (r) => ({ id: r.id, name: r.name, date: r.date, notes: r.notes, items: Array.isArray(r.items) ? r.items : [], updated: Number(r.updated) || 0 });
+  const blankSong = (id, u) => ({ ...songToRow({ id, title: '' }), updated: u, deleted: true });
+  const blankSet = (id, u) => ({ ...setToRow({ id, name: '' }), updated: u, deleted: true });
+
+  /** Merge rows from the server into this device. Newest edit wins. Returns true if anything changed here. */
+  function applyRemote(songRows = [], setRows = []) {
+    let changed = false;
+    const merge = (rows, list, marks, toLocal, find) => {
+      for (const r of rows) {
+        const u = Number(r.updated) || 0, mine = find(r.id), mark = marks[r.id];
+        if (r.deleted) {
+          if (mine && (mine.updated || 0) <= u) { list.splice(list.indexOf(mine), 1); changed = true; }
+          if (!mine || (mine.updated || 0) <= u) marks[r.id] = { u, d: true };
+        } else if (!mine) {
+          if (mark && !mark.d && u <= mark.u) continue; // deleted here, not yet sent
+          list.push(toLocal(r)); marks[r.id] = { u, d: false }; changed = true;
+        } else if (u > (mine.updated || 0)) {
+          Object.assign(mine, toLocal(r)); marks[r.id] = { u, d: false }; changed = true;
+        } else if (u === (mine.updated || 0)) marks[r.id] = { u, d: false };
+      }
+    };
+    merge(songRows, songs, synced.songs, rowToSong, byId);
+    merge(setRows, setlists, synced.sets, rowToSet, setById);
+    if (changed) { writeJSON(libKey(), songs); writeJSON(setKey(), setlists); }
+    writeJSON(syncedKey(), synced);
+    return changed;
+  }
+
+  async function fetchAll(table) {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sync.client.from(table).select('*').eq('team_id', team.id).range(from, from + 999);
+      if (error) throw error;
+      out.push(...data);
+      if (data.length < 1000) return out;
+    }
+  }
+
+  async function pullAll() {
+    const [songRows, setRows] = await Promise.all([fetchAll('songs'), fetchAll('setlists')]);
+    if (applyRemote(songRows, setRows)) refreshView();
+  }
+
+  /** Send everything that changed on this device since the last sync. */
+  async function pushDirty() {
+    if (!team || !sync.client) return;
+    if (sync.pushing) { sync.again = true; return; }
+    sync.pushing = true;
+    try {
+      do {
+        sync.again = false;
+        const now = Date.now();
+        const songRows = songs.filter((x) => { const m = synced.songs[x.id]; return !m || m.d || (x.updated || 0) > m.u; }).map(songToRow);
+        for (const [id, m] of Object.entries(synced.songs)) if (!m.d && !byId(id)) songRows.push(blankSong(id, Math.max(now, m.u + 1)));
+        const setRows = setlists.filter((x) => { const m = synced.sets[x.id]; return !m || m.d || (x.updated || 0) > m.u; }).map(setToRow);
+        for (const [id, m] of Object.entries(synced.sets)) if (!m.d && !setById(id)) setRows.push(blankSet(id, Math.max(now, m.u + 1)));
+        if (!songRows.length && !setRows.length) break;
+        setSync('syncing');
+        for (const [table, rows, marks] of [['songs', songRows, synced.songs], ['setlists', setRows, synced.sets]]) {
+          for (let i = 0; i < rows.length; i += 200) {
+            const chunk = rows.slice(i, i + 200);
+            const { error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' });
+            if (error) throw error;
+            for (const r of chunk) marks[r.id] = { u: r.updated, d: r.deleted };
+          }
+        }
+        writeJSON(syncedKey(), synced);
+      } while (sync.again);
+      setSync('synced');
+    } catch (err) {
+      setSync(navigator.onLine ? 'error' : 'offline', err.message || String(err));
+    } finally {
+      sync.pushing = false;
+    }
+  }
+
+  function scheduleSync() {
+    if (!team) return;
+    clearTimeout(sync.timer);
+    if (!navigator.onLine) { setSync('offline'); return; }
+    if (!sync.client) return; // startSync() will push once connected
+    sync.timer = setTimeout(pushDirty, 500);
+  }
+
+  function subscribe() {
+    if (sync.channel) sync.client.removeChannel(sync.channel);
+    const f = `team_id=eq.${team.id}`;
+    sync.channel = sync.client.channel('team-' + team.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'songs', filter: f }, (p) => onRemote('songs', p.new))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'setlists', filter: f }, (p) => onRemote('setlists', p.new))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'team_members', filter: f }, () => loadMembers())
+      .subscribe();
+  }
+
+  function onRemote(table, row) {
+    if (!row || !row.id) return;
+    const editing = state.route && state.route.name === 'edit' && table === 'songs' && state.route.id === row.id;
+    const changed = table === 'songs' ? applyRemote([row], []) : applyRemote([], [row]);
+    if (!changed) return;
+    const who = sync.members.find((m) => m.user_id === row.updated_by);
+    if (editing) toast(`${who ? who.display_name : 'Someone'} just changed this song. Saving will keep your version.`);
+    refreshView();
+  }
+
+  async function loadMembers() {
+    if (!team || !sync.client) return;
+    const { data } = await sync.client.from('team_members').select('user_id, display_name, role, joined_at').eq('team_id', team.id).order('joined_at');
+    if (!data) return;
+    sync.members = data;
+    const me = data.find((m) => m.user_id === sync.userId);
+    if (me && me.role !== team.role) { team.role = me.role; writeJSON(TEAM_KEY, team); }
+    if (state.route && state.route.name === 'settings' && !main.contains(document.activeElement)) viewSettings();
+  }
+
+  /** Connect, re-join if this device lost its sign-in, then pull, push and listen for live changes. */
+  async function startSync() {
+    if (!team || !cloudReady()) return;
+    try {
+      setSync('syncing');
+      const c = await cloud();
+      const { data: t, error } = await c.from('teams').select('id, name, join_code').eq('id', team.id).maybeSingle();
+      if (error) throw error;
+      if (t) Object.assign(team, { name: t.name, code: t.join_code });
+      else {
+        const { data: j, error: e2 } = await c.rpc('join_team', { code: team.code, my_name: team.myName });
+        if (e2) throw new Error(/code/i.test(e2.message) ? 'This team’s code has changed. Ask your leader for the new one.' : e2.message);
+        Object.assign(team, { name: j.name, code: j.join_code });
+      }
+      writeJSON(TEAM_KEY, team);
+      await pullAll();
+      subscribe();
+      loadMembers();
+      await pushDirty();
+      setSync('synced');
+      renderNav();
+    } catch (err) {
+      setSync(navigator.onLine ? 'error' : 'offline', err.message || String(err));
+    }
+  }
+
+  /** Re-draw whatever is on screen after a teammate's change (never mid-typing). */
+  function refreshView() {
+    renderNav();
+    const r = state.route;
+    if (!r || r.name === 'edit') return;
+    const a = document.activeElement;
+    if (a && main.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) { sync.pendingRefresh = true; return; }
+    const y = window.scrollY;
+    if (r.name === 'songs') viewSongs(r.fav);
+    else if (r.name === 'sets') viewSets();
+    else if (r.name === 'set') viewSet(r.id);
+    else if (r.name === 'song') viewSong(r);
+    else if (r.name === 'settings') viewSettings();
+    window.scrollTo(0, y);
+  }
+  document.addEventListener('focusout', () => { if (sync.pendingRefresh) { sync.pendingRefresh = false; setTimeout(refreshView, 50); } });
+
+  /** Switch this device into a team's library (or back to personal when t is null). */
+  function enterTeam(t, startingSongs, startingSets) {
+    if (sync.channel && sync.client) { sync.client.removeChannel(sync.channel); sync.channel = null; }
+    team = t;
+    if (team) {
+      writeJSON(TEAM_KEY, team);
+      if (startingSongs) writeJSON(libKey(), startingSongs);
+      if (startingSets) writeJSON(setKey(), startingSets);
+    } else {
+      try { localStorage.removeItem(TEAM_KEY); } catch { /* ignore */ }
+    }
+    loadSpace();
+    sync.members = [];
+    setSync(team ? 'syncing' : 'off');
+    renderNav();
+    if (team) startSync();
+  }
+
+  const copyOf = (x) => JSON.parse(JSON.stringify(x));
+  const inviteLink = () => location.origin + location.pathname + '#join=' + team.code;
+  const prettyCode = (c) => String(c || '').replace(/(.{4})(?=.)/g, '$1-');
+
+  function openCreateTeam() {
+    const d = modal(`
+      <h2>Create a team</h2>
+      <p>Everyone who joins sees the same songs and setlists, and changes show up on every phone straight away.</p>
+      <div class="fields one">
+        <label class="field">Team name<input id="tName" placeholder="e.g. Grace Chapel Band" maxlength="80"></label>
+        <label class="field">Your name<input id="tMe" placeholder="How the team sees you" maxlength="60" value="${esc(prefs.myName || '')}"></label>
+        <label class="check"><input type="checkbox" id="tCopy" checked> Put my ${songs.length} songs${setlists.length ? ` and ${setlists.length} setlists` : ''} in the team library</label>
+      </div>
+      <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form><button class="btn primary" id="tGo">Create team</button></div>`);
+    $('#tGo', d).addEventListener('click', async (e) => {
+      const name = $('#tName', d).value.trim(), me = $('#tMe', d).value.trim();
+      if (!name || !me) { toast('Add a team name and your name'); return; }
+      e.currentTarget.disabled = true;
+      try {
+        const c = await cloud();
+        const { data, error } = await c.rpc('create_team', { team_name: name, my_name: me });
+        if (error) throw error;
+        prefs.myName = me; savePrefs();
+        const copy = $('#tCopy', d).checked;
+        enterTeam({ id: data.id, name: data.name, code: data.join_code, role: 'leader', myName: me }, copy ? copyOf(songs) : [], copy ? copyOf(setlists) : []);
+        d.close();
+        toast(`Team “${data.name}” created`);
+        go('#/settings');
+        viewSettings();
+      } catch (err) {
+        e.currentTarget.disabled = false;
+        toast('Could not create the team: ' + (err.message || err));
+      }
+    });
+  }
+
+  function openJoinTeam(code = '') {
+    const d = modal(`
+      <h2>Join a team</h2>
+      <p>Enter the code your team leader shared. You'll see the team's songs and setlists, and your changes are shared with them.</p>
+      <div class="fields one">
+        <label class="field">Team code<input id="jCode" placeholder="ABCD-2345" value="${esc(prettyCode(code))}" autocapitalize="characters" autocomplete="off"></label>
+        <label class="field">Your name<input id="jMe" placeholder="How the team sees you" maxlength="60" value="${esc(prefs.myName || '')}"></label>
+        ${songs.length ? `<label class="check"><input type="checkbox" id="jCopy"> Also add my ${songs.length} songs to the team</label>` : ''}
+        ${team ? `<p class="warn">You'll leave “${esc(team.name)}” on this device.</p>` : ''}
+      </div>
+      <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form><button class="btn primary" id="jGo">Join team</button></div>`);
+    $('#jGo', d).addEventListener('click', async (e) => {
+      const c0 = $('#jCode', d).value.trim(), me = $('#jMe', d).value.trim();
+      if (!c0 || !me) { toast('Add the team code and your name'); return; }
+      e.currentTarget.disabled = true;
+      try {
+        const c = await cloud();
+        const { data, error } = await c.rpc('join_team', { code: c0, my_name: me });
+        if (error) throw new Error(/no team/i.test(error.message) ? 'No team has that code. Check it with your leader.' : error.message);
+        prefs.myName = me; savePrefs();
+        const copy = $('#jCopy', d)?.checked;
+        const personalSongs = team ? readJSON(LIB_KEY, []) : songs;
+        enterTeam({ id: data.id, name: data.name, code: data.join_code, role: 'member', myName: me }, copy ? copyOf(personalSongs) : readJSON(`stobite-chords:team:${data.id}:songs`, []), undefined);
+        d.close();
+        toast(`Welcome to ${data.name}`);
+        go('#/');
+      } catch (err) {
+        e.currentTarget.disabled = false;
+        toast(err.message || String(err));
+      }
+    });
+  }
+
+  function openLeaveTeam() {
+    const d = modal(`
+      <h2>Leave “${esc(team.name)}”?</h2>
+      <p>The team keeps its songs. You can rejoin later with the code. Do you want a copy of the team's ${songs.length} songs on this phone?</p>
+      <div class="stack">
+        <button class="btn primary" data-x="keep">Leave and keep a copy</button>
+        <button class="btn danger" data-x="drop">Leave without a copy</button>
+      </div>
+      <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form></div>`);
+    d.addEventListener('click', async (e) => {
+      const x = e.target.closest('[data-x]')?.dataset.x;
+      if (!x) return;
+      const teamSongs = copyOf(songs), teamSets = copyOf(setlists), old = team;
+      try {
+        if (sync.client && sync.userId) await sync.client.from('team_members').delete().eq('team_id', old.id).eq('user_id', sync.userId);
+      } catch { /* offline: leaving locally is still fine */ }
+      for (const k of ['songs', 'setlists', 'synced']) { try { localStorage.removeItem(`stobite-chords:team:${old.id}:${k}`); } catch { /* ignore */ } }
+      enterTeam(null);
+      if (x === 'keep') mergeAll({ songs: teamSongs, setlists: teamSets });
+      d.close();
+      toast(`You left ${old.name}`);
+      viewSettings();
+    });
+  }
+
+  function teamCardHTML() {
+    if (!cloudReady()) {
+      return `<section class="card team-card"><h2>Team</h2>
+        <div class="srow"><div><b>Team sync isn't switched on yet</b><small>Songs stay on this device. Use Share to send them to people.</small></div></div></section>`;
+    }
+    if (!team) {
+      return `<section class="card team-card"><h2>Team</h2>
+        <div class="team-empty">
+          <div class="bubble">${icon('users')}</div>
+          <div><b>Share one library with your band</b><small>Everyone sees the same songs and setlists, and edits show up on every phone straight away.</small></div>
+        </div>
+        <div class="team-actions"><button class="btn primary" id="tCreate">${icon('plus')}Create a team</button><button class="btn" id="tJoin">${icon('users')}Join a team</button></div>
+      </section>`;
+    }
+    const leader = team.role === 'leader';
+    return `<section class="card team-card"><h2>Team</h2>
+      <div class="team-head">
+        <div class="logo sm">${esc((team.name || '?')[0].toUpperCase())}</div>
+        <div><b>${esc(team.name)}</b><small>You're ${esc(team.myName)} · ${leader ? 'Leader' : 'Member'}</small></div>
+        <span class="sync-pill" data-sync>${syncPill()}</span>
+      </div>
+      ${sync.status === 'error' && sync.detail ? `<p class="warn">${esc(sync.detail)}</p>` : ''}
+      <div class="code-box">
+        <div><small>Team code</small><b>${esc(prettyCode(team.code))}</b></div>
+        <div class="code-btns">
+          <button class="btn soft" id="tInvite">${icon('share')}Invite</button>
+          ${leader ? `<button class="btn ghost" id="tNewCode" title="Make a new code (the old one stops working)">New code</button>` : ''}
+        </div>
+      </div>
+      <div class="members">${sync.members.length ? sync.members.map((m) => `
+        <div class="member"><span class="av" style="--h:${hueOf(m.user_id)}">${esc((m.display_name || '?')[0].toUpperCase())}</span>
+          <span><b>${esc(m.display_name)}${m.user_id === sync.userId ? ' (you)' : ''}</b><small>${m.role === 'leader' ? 'Leader' : 'Member'}</small></span>
+          ${leader && m.user_id !== sync.userId ? `<button class="btn ghost icon-only danger" data-rm-member="${esc(m.user_id)}" title="Remove from team">${icon('x')}</button>` : ''}
+        </div>`).join('') : '<p class="sub">Loading members…</p>'}</div>
+      <div class="team-actions"><button class="btn" id="tSync">${icon('scroll')}Sync now</button><button class="btn danger" id="tLeave">Leave team</button></div>
+    </section>`;
+  }
+
+  function bindTeamCard() {
+    $('#tCreate')?.addEventListener('click', openCreateTeam);
+    $('#tJoin')?.addEventListener('click', () => openJoinTeam());
+    $('#tLeave')?.addEventListener('click', openLeaveTeam);
+    $('#tSync')?.addEventListener('click', () => startSync());
+    $('#tInvite')?.addEventListener('click', async () => {
+      const text = `Join ${team.name} on Stobite Chords: ${inviteLink()}  (team code ${prettyCode(team.code)})`;
+      try {
+        if (navigator.share) { await navigator.share({ title: `Join ${team.name}`, text, url: inviteLink() }); return; }
+      } catch (err) { if (err.name === 'AbortError') return; }
+      toast((await copyText(text)) ? 'Invite copied. Paste it in your team chat' : 'Code: ' + prettyCode(team.code));
+    });
+    $('#tNewCode')?.addEventListener('click', async () => {
+      if (!confirm('Make a new team code? The old code and invite links stop working. People already in the team stay in.')) return;
+      try {
+        const { data, error } = await sync.client.rpc('new_team_code', { t: team.id });
+        if (error) throw error;
+        team.code = data; writeJSON(TEAM_KEY, team); viewSettings(); toast('New code made');
+      } catch (err) { toast('Could not change the code: ' + (err.message || err)); }
+    });
+    for (const b of $$('[data-rm-member]')) {
+      b.addEventListener('click', async () => {
+        const m = sync.members.find((x) => x.user_id === b.dataset.rmMember);
+        if (!m || !confirm(`Remove ${m.display_name} from the team? Also make a new code if they shouldn't rejoin.`)) return;
+        const { error } = await sync.client.from('team_members').delete().eq('team_id', team.id).eq('user_id', m.user_id);
+        if (error) toast('Could not remove: ' + error.message); else loadMembers();
+      });
+    }
+  }
+
+  window.addEventListener('online', () => startSync());
+  window.addEventListener('offline', () => { if (team) setSync('offline'); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && team && sync.client) startSync(); });
+
   /* ================= misc ================= */
   let toastTimer;
   function toast(msg, actionLabel, action) {
@@ -1705,6 +2140,7 @@ Jesus is the answer</pre>
 
   window.addEventListener('hashchange', route);
   route();
+  if (team) startSync();
 
   if ('serviceWorker' in navigator && canLink()) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

@@ -1,6 +1,6 @@
 // Offline support: network first, fall back to the cached copy.
-const CACHE = 'stobite-chords-v4';
-const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'songs.js', 'manifest.webmanifest', 'icon.svg', 'apple-touch-icon.png', 'icon-512.png'];
+const CACHE = 'stobite-chords-v5';
+const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'config.js', 'songs.js', 'manifest.webmanifest', 'icon.svg', 'apple-touch-icon.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
