@@ -14,7 +14,15 @@ Then open http://localhost:4321.
 
 Host the folder on any static host, for example Netlify Drop (drag the folder onto app.netlify.com/drop), GitHub Pages or Cloudflare Pages. Open the URL on your phone and choose **Add to Home Screen**. It then works offline like an app.
 
-Each device keeps its own library in the browser. Use **Share** to move songs between people or devices. When the app is hosted, "Copy share link" imports with one tap.
+Without a team, each device keeps its own library. Use **Share** to move songs between people or devices.
+
+## Team sync (Supabase)
+
+Settings → Team → **Create a team** gives a code and an invite link. Everyone in the team shares one library and one set of setlists, and changes show up live on every device. Each device also keeps a copy, so it works offline and syncs when it's back online. When two people edit the same song, the newest edit wins.
+
+- `config.js` holds the Supabase project URL and the publishable (anon) key. Both are safe to publish.
+- `supabase/schema.sql` creates the tables, the security rules (only team members can read or write a team's songs) and the create/join functions. Run it in the Supabase SQL Editor.
+- Anonymous sign-ins must be switched on (Authentication → Sign In / Providers).
 
 ## Features
 

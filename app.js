@@ -1822,6 +1822,8 @@ Jesus is the answer</pre>
       setSync('synced');
     } catch (err) {
       setSync(navigator.onLine ? 'error' : 'offline', err.message || String(err));
+      clearTimeout(sync.retry);
+      sync.retry = setTimeout(pushDirty, 15000); // patchy signal: try again shortly
     } finally {
       sync.pushing = false;
     }
