@@ -28,6 +28,7 @@
     down: '<path d="m6 9 6 6 6-6"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
+    lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
@@ -113,8 +114,9 @@
   // Chromatic sol-fa by semitone above "do": do de re ma mi fa fi so zi la ta ti
   const SOLFA_SEMI = ['do', 'de', 're', 'ma', 'mi', 'fa', 'fi', 'so', 'zi', 'la', 'ta', 'ti'];
   const FLAT_KEYS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm']);
-  const KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B',
-    'Cm', 'C#m', 'Dm', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'];
+  const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+  // The keys the band uses (minor keys from older songs still work).
+  const KEYS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
   const TIMES = ['4/4', '3/4', '6/8', '2/4', '12/8', '9/8', '2/2'];
   const TAG_SUGGESTIONS = ['Praise', 'Worship', 'Hymn', 'Gospel', 'Communion', 'Offering', 'Altar call', 'Christmas', 'Easter', 'Kids', 'Opening', 'Closing'];
 
@@ -157,7 +159,7 @@
     const m = /^([A-G])([b#♭♯]?)(m?)$/.exec(String(key || '').trim());
     if (!m) return null;
     const acc = normAcc(m[2]);
-    return { semi: noteSemi(m[1], acc), minor: !!m[3], flat: acc === 'b' || FLAT_KEYS.has(m[1] + acc + m[3]) };
+    return { semi: noteSemi(m[1], acc), letter: LETTERS.indexOf(m[1]), minor: !!m[3], flat: acc === 'b' || FLAT_KEYS.has(m[1] + acc + m[3]) };
   }
   const numSemi = (acc, deg) => (DEGREE_SEMI[deg] + (acc === '#' ? 1 : acc === 'b' ? -1 : 0) + 12) % 12;
 
@@ -169,44 +171,105 @@
     return deg(p.root) + p.qual + (p.bass != null ? '/' + deg(p.bass) : '');
   }
 
-  function noteName(acc, deg, mode, key, post) {
-    if (mode === 'solfa') return SOLFA_SEMI[numSemi(acc, deg)];
-    if (mode === 'letters') {
-      const k = keyInfo(key);
-      if (k) {
-        const flat = acc === 'b' || (acc !== '#' && k.flat);
-        return (flat ? FLATS : SHARPS)[(k.semi + numSemi(acc, deg)) % 12];
-      }
-    }
-    return post ? deg + prettyAcc(acc) : prettyAcc(acc) + deg;
+  const ACC_SIGN = { '-2': '𝄫', '-1': '♭', 0: '', 1: '♯', 2: '𝄪' };
+  /** Spell scale degree (with accidental) in a key using the right letter: 3 in C♯ is E♯, ♭7 in C is B♭. */
+  function spellRoot(acc, deg, k) {
+    const letter = LETTERS[(k.letter + deg - 1) % 7];
+    const semi = (k.semi + numSemi(acc, deg)) % 12;
+    const diff = ((semi - NOTE_SEMI[letter] + 18) % 12) - 6;
+    return { name: letter + (ACC_SIGN[diff] ?? ''), semi, letter: LETTERS.indexOf(letter) };
   }
 
-  function parseAny(tok, songKey) {
-    let p = parseNum(tok);
-    if (!p && parseLetter(tok) && keyInfo(songKey)) p = parseNum(letterToNumber(tok, songKey));
-    return p;
+  /* ---------- the band's chord language ---------- */
+  const LANG_KEY = 'stobite-chords:language';
+  // [id, label, quality as written in a chord]
+  const QUALITIES = [
+    ['maj', 'Major', ''], ['min', 'Minor', 'm'], ['dim', 'Diminished', '°'], ['aug', 'Augmented', '+'],
+    ['min#5', 'Minor ♯5', 'm#5'], ['sus4', 'Sus 4', 'sus4'], ['sus2', 'Sus 2', 'sus2'],
+    ['7', 'Dominant 7', '7'], ['maj7', 'Major 7', 'maj7'], ['m7', 'Minor 7', 'm7'], ['dim7', 'Diminished 7', '°7'],
+  ];
+  const QCODE = Object.fromEntries(QUALITIES.map((q) => [q[0], q[2]]));
+  const DEFAULT_LANGUAGE = {
+    plain: { 1: 'maj', 2: 'min', 3: 'min', 4: 'maj', 5: 'maj', 6: 'min', 7: 'dim' },
+    custom: [
+      { name: '4m', root: '4', quality: 'min' },
+      { name: '1#', root: '6', quality: 'maj' },
+      { name: '4#', root: '2', quality: 'maj' },
+      { name: '5#', root: '3', quality: 'maj' },
+      { name: '6#', root: '2', quality: 'min#5' },
+    ],
+    updated: 0,
+  };
+  let language = readJSON(LANG_KEY, null) || JSON.parse(JSON.stringify(DEFAULT_LANGUAGE));
+  const customFor = (main) => language.custom.find((c) => c.name && normTok(c.name) === main);
+  const sameQual = (a, b) => normTok(a).replace(/^(min|-)/, 'm') === normTok(b).replace(/^(min|-)/, 'm');
+
+  function splitBass(n) {
+    const i = n.lastIndexOf('/');
+    if (i > 0) {
+      const b = /^([b#]?)([1-7])([b#]?)$/.exec(n.slice(i + 1));
+      if (b) return [n.slice(0, i), { acc: b[1] || b[3] || '', post: !b[1] && !!b[3], deg: +b[2] }];
+    }
+    return [n, null];
   }
+
+  /**
+   * Read a chord the way the band speaks it. Plain 2, 3, 6 are minor; special names like 1# or 6#
+   * come from the language settings. Returns { acc, deg, qual (real quality), shown (quality to print), label, custom, bass }.
+   */
+  function resolveChord(tok, songKey) {
+    let n = normTok(tok);
+    if (!/^[b#]?[1-7]/.test(n)) {
+      if (!parseLetter(n) || !keyInfo(songKey)) return null;
+      n = letterToNumber(n, songKey);
+    }
+    const [main, bass] = splitBass(n);
+    const c = customFor(main);
+    if (c) {
+      const r = /^([b#]?)([1-7])$/.exec(normTok(c.root));
+      if (r) return { acc: r[1], post: false, deg: +r[2], qual: QCODE[c.quality] ?? '', shown: '', label: c.name, custom: true, bass };
+    }
+    const p = parseNum(main);
+    if (!p) return null;
+    const implied = p.acc ? '' : (QCODE[language.plain[p.deg]] ?? '');
+    let qual = p.qual, shown = p.qual;
+    if (!qual) qual = implied;
+    else if (!p.acc && sameQual(qual, implied)) shown = '';
+    return { acc: p.acc, post: p.post, deg: p.deg, qual, shown, label: null, custom: false, bass: bass || p.bass };
+  }
+  const parseAny = resolveChord;
+
+  function degName(acc, deg, post, mode, key) {
+    if (mode === 'solfa') return SOLFA_SEMI[numSemi(acc, deg)];
+    if (mode === 'letters') { const k = keyInfo(key); if (k) return spellRoot(acc, deg, k).name; }
+    return post ? deg + prettyAcc(acc) : prettyAcc(acc) + deg;
+  }
+  const prettyName = (label) => normTok(label).replace(/b(?=\d)|(?<=\d)b/g, '♭').replace(/#/g, '♯');
 
   /** One chord token -> display HTML for the current mode (numbers / solfa / letters) and part (keys / bass). */
   function chordHTML(tok, o) {
-    const p = parseAny(tok, o.songKey);
-    if (!p) return esc(tok);
+    const r = resolveChord(tok, o.songKey);
+    if (!r) return esc(tok);
     if (o.part === 'bass') {
-      const b = p.bass || p;
-      return esc(noteName(b.acc, b.deg, o.mode, o.viewKey, b.post));
+      const b = r.bass || r;
+      return esc(degName(b.acc, b.deg, b.post, o.mode, o.viewKey));
     }
-    let h = esc(noteName(p.acc, p.deg, o.mode, o.viewKey, p.post));
-    if (p.qual) h += `<span class="q">${esc(prettyQual(p.qual))}</span>`;
-    if (p.bass) h += '/' + esc(noteName(p.bass.acc, p.bass.deg, o.mode, o.viewKey, p.bass.post));
-    return h;
+    const bassHTML = r.bass ? '/' + esc(degName(r.bass.acc, r.bass.deg, r.bass.post, o.mode, o.viewKey)) : '';
+    const q = (x) => (x ? `<span class="q">${esc(prettyQual(x))}</span>` : '');
+    if (o.mode === 'letters') return esc(degName(r.acc, r.deg, false, 'letters', o.viewKey)) + q(r.qual) + bassHTML;
+    if (r.custom) {
+      if (o.mode === 'solfa') {
+        const m = /^([b#]?)([1-7])(.*)$/.exec(normTok(r.label));
+        if (m) return esc(degName(m[1], +m[2], false, 'solfa')) + q(m[3].replace(/#/g, '♯').replace(/^b$/, '♭')) + bassHTML;
+      }
+      return esc(prettyName(r.label)) + bassHTML;
+    }
+    return esc(degName(r.acc, r.deg, r.post, o.mode, o.viewKey)) + q(r.shown) + bassHTML;
   }
   /** Clickable chord: tapping it opens the note spelling. */
-  const chordBtn = (tok, o) => (parseAny(tok, o.songKey) ? `<span class="ch" data-ch="${esc(tok)}">${chordHTML(tok, o)}</span>` : esc(tok));
+  const chordBtn = (tok, o) => (resolveChord(tok, o.songKey) ? `<span class="ch" data-ch="${esc(tok)}">${chordHTML(tok, o)}</span>` : esc(tok));
 
   /* ================= chord spelling ================= */
-  const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-  const ACC_SIGN = { '-2': '𝄫', '-1': '♭', 0: '', 1: '♯', 2: '𝄪' };
-
   /** Chord quality -> chord tones as {semi above root, letter step above root, label}. */
   function chordTones(q) {
     let s = normTok(q).replace(/[()\s,]/g, '');
@@ -266,34 +329,36 @@
       m7b5: 'half-diminished', 7: 'dominant 7th', m7: 'minor 7th', maj7: 'major 7th', M7: 'major 7th', '°7': 'diminished 7th',
       sus: 'suspended 4th', sus4: 'suspended 4th', sus2: 'suspended 2nd', 5: 'power chord', 6: 'major 6th', m6: 'minor 6th',
       9: 'dominant 9th', m9: 'minor 9th', maj9: 'major 9th', add9: 'add 9', 2: 'add 2', '7sus4': '7 suspended 4th',
+      'm#5': 'minor ♯5', M: 'major', maj: 'major',
     };
     return names[n] || prettyQual(n);
   }
 
-  /** Spell a chord in a key: letters with proper sharps/flats, plus degree and sol-fa for each note. */
-  function spellChord(tok, songKey, viewKey) {
-    const p = parseAny(tok, songKey);
-    const k = keyInfo(viewKey) || keyInfo(songKey) || keyInfo('C');
-    if (!p) return null;
-    const rootSemi = (k.semi + numSemi(p.acc, p.deg)) % 12;
-    const flat = p.acc === 'b' || (p.acc !== '#' && k.flat);
-    const rootName = (flat ? FLATS : SHARPS)[rootSemi];
-    const rootLetter = LETTERS.indexOf(rootName[0]);
-    const notes = chordTones(p.qual).map((t) => {
-      const letter = LETTERS[(rootLetter + t.step) % 7];
-      const target = (rootSemi + t.semi) % 12;
+  /** Notes of a chord built on a degree of a key, spelled with the right letters. */
+  function chordNotes(acc, deg, qual, k) {
+    const root = spellRoot(acc, deg, k);
+    return chordTones(qual).map((t) => {
+      const letter = LETTERS[(root.letter + t.step) % 7];
+      const target = (root.semi + t.semi) % 12;
       const diff = ((target - NOTE_SEMI[letter] + 18) % 12) - 6;
-      const rel = (target - k.semi + 12) % 12;
-      return { name: letter + (ACC_SIGN[diff] ?? ''), semi: target, interval: t.semi, label: t.label, degree: SEMI_DEGREE[rel], solfa: SOLFA_SEMI[rel] };
+      return { name: letter + (ACC_SIGN[diff] ?? ''), semi: target, interval: t.semi };
     });
+  }
+
+  /** Spell a chord in a key: its real name (e.g. "D major") and its notes as letters. */
+  function spellChord(tok, songKey, viewKey) {
+    const r = resolveChord(tok, songKey);
+    const k = keyInfo(viewKey) || keyInfo(songKey) || keyInfo('C');
+    if (!r) return null;
+    const root = spellRoot(r.acc, r.deg, k);
+    const notes = chordNotes(r.acc, r.deg, r.qual, k);
     let bass = null;
-    if (p.bass) {
-      const bs = (k.semi + numSemi(p.bass.acc, p.bass.deg)) % 12;
-      const inChord = notes.find((n) => n.semi === bs);
-      const rel = (bs - k.semi + 12) % 12;
-      bass = { name: inChord ? inChord.name : (p.bass.acc === 'b' || (p.bass.acc !== '#' && k.flat) ? FLATS : SHARPS)[bs], semi: bs, degree: SEMI_DEGREE[rel], solfa: SOLFA_SEMI[rel] };
+    if (r.bass) {
+      const b = spellRoot(r.bass.acc, r.bass.deg, k);
+      const inChord = notes.find((n) => n.semi === b.semi);
+      bass = { name: inChord ? inChord.name : b.name, semi: b.semi };
     }
-    return { p, key: k, rootName, rootSemi, name: `${rootName} ${qualityName(p.qual)}`, notes, bass };
+    return { r, key: k, rootName: root.name, rootSemi: root.semi, name: `${root.name} ${qualityName(r.qual)}`, notes, bass };
   }
 
   /** Small piano with the chord's notes lit up (bass note in its own colour, an octave below). */
@@ -328,7 +393,7 @@
   /* ================= chart parsing ================= */
   const SECTION_RE = /^\s*(?:\{\s*(.+?)\s*\}|((?:verse|chorus|pre-?chorus|bridge|intro|outro|tag|ending|interlude|refrain|coda|vamp|instrumental|hook|turnaround)(?:\s*\d+)?(?:\s*\(.*\))?)\s*:?)\s*$/i;
   const FILLER_RE = /^(?:\|+|-|\/|%|x\d+|\(x\d+\)|N\.?C\.?)$/i;
-  const isChordTok = (t) => !!(parseNum(t) || parseLetter(t));
+  const isChordTok = (t) => !!(parseNum(t) || parseLetter(t) || customFor(splitBass(normTok(t))[0]));
 
   function isChordLine(line) {
     if (!line || line.includes('[') || !line.trim()) return false;
@@ -498,7 +563,7 @@
   function navKey(r) {
     if (r.name === 'songs') return r.fav ? 'favorites' : 'songs';
     if (r.name === 'sets' || r.name === 'set' || (r.name === 'song' && r.setId)) return 'sets';
-    if (r.name === 'settings') return 'settings';
+    if (r.name === 'settings' || r.name === 'language') return 'settings';
     return 'songs';
   }
 
@@ -507,7 +572,7 @@
     const counts = { songs: songs.length, sets: setlists.length, favorites: prefs.favs.filter(byId).length };
     const recentSets = [...setlists].sort(bySetDate).slice(0, 6);
     $('#side').innerHTML = `
-      <a class="brand" href="#/"><span class="logo">1</span><span>Stobite Chords<small>Chord charts for worship</small></span></a>
+      <a class="brand" href="#/"><span class="logo"><img src="icon.svg" alt=""></span><span>Stobite Chords<small>Chord charts for worship</small></span></a>
       <a class="btn primary new" href="#/new">${icon('plus')}New song</a>
       <nav class="nav">${NAV.map((n) => `<a href="${n.href}" class="${n.key === active ? 'on' : ''}">${icon(n.icon)}${n.label}${counts[n.key] != null ? `<span class="n">${counts[n.key]}</span>` : ''}</a>`).join('')}</nav>
       ${recentSets.length ? `<div class="side-h">Setlists</div><div class="side-sets">${recentSets.map((s) => `<a href="#/set/${enc(s.id)}" style="--h:${hueOf(s.id)}"><i></i><span>${esc(s.name)}</span></a>`).join('')}</div>` : ''}
@@ -538,6 +603,7 @@
       case 'e': return { name: 'edit', id: p[1] };
       case 'new': return { name: 'edit', id: null };
       case 'settings': return { name: 'settings' };
+      case 'language': return { name: 'language' };
       default: return { name: 'songs', fav: false };
     }
   }
@@ -567,6 +633,7 @@
     else if (r.name === 'song') viewSong(r);
     else if (r.name === 'edit') viewEditor(r.id);
     else if (r.name === 'settings') viewSettings();
+    else if (r.name === 'language') viewLanguage();
     window.scrollTo(0, 0);
     renderDock();
   }
@@ -766,7 +833,9 @@
             ${s.artist ? `<p class="hero-artist">${esc(s.artist)}</p>` : ''}
           </div>
           <div class="stats">
-            <div class="stat"><span>Key</span><b>${esc(prettyKey(key) || '—')}${key !== s.key && s.key ? ` <s>orig ${esc(prettyKey(s.key))}</s>` : ''}</b></div>
+            <button class="stat stat-btn key-flip" data-act="flip-key" title="Tap to see the original key">
+              <span class="flip"><span class="face"><span>Key</span><b>${esc(prettyKey(key) || '—')}</b></span>
+              <span class="face back"><span>Original</span><b>${esc(prettyKey(s.key) || '—')}</b></span></span></button>
             <button class="stat stat-btn" data-act="metro" title="Start metronome"><span>Tempo</span><b>${esc(s.tempo || '—')}<small> bpm</small></b><i class="beat" id="heroBeat"></i></button>
             <div class="stat"><span>Time</span><b>${esc(s.time || '—')}</b></div>
           </div>
@@ -795,7 +864,10 @@
     const sameKind = KEYS.filter((x) => keyInfo(x).minor === (k ? k.minor : false));
     if (state.viewKey && !sameKind.includes(state.viewKey)) sameKind.unshift(state.viewKey);
     const lyrics = prefs.part === 'lyrics';
+    const playKey = viewOpts(s).viewKey || s.key;
     $('#controls').innerHTML = `
+      ${playKey ? `<button class="tool key-chip key-flip" data-act="flip-key" title="Tap to see the original key">
+        <span class="flip"><span class="face">Key <b>${esc(prettyKey(playKey))}</b></span><span class="face back">Original <b>${esc(prettyKey(s.key))}</b></span></span></button>` : ''}
       <div class="seg part" role="group" aria-label="Show chords for">
         ${[['keys', 'piano', 'Keys'], ['bass', 'guitar', 'Bass'], ['lyrics', 'mic', 'Lyrics']].map(([v, ic, l]) =>
           `<button data-part="${v}" aria-pressed="${prefs.part === v}">${icon(ic)}${l}</button>`).join('')}
@@ -815,7 +887,7 @@
     document.documentElement.style.setProperty('--lyric', prefs.size + 'px');
     const o = viewOpts(s);
     const used = lyrics ? [] : chordsUsed(s.chart, o);
-    $('#used').innerHTML = used.length ? `<span>${prefs.part === 'bass' ? 'Bass notes' : 'Chords'}</span>${used.map((h) => `<b>${h}</b>`).join('')}` : '';
+    $('#used').innerHTML = used.length ? `<span>${prefs.part === 'bass' ? 'Bass notes' : 'Chords'}</span>${used.join('')}` : '';
     $('#chart').innerHTML = renderChart(s.chart, o) || '<p class="sub">This song has no lyrics yet. Tap Edit to add them.</p>';
     const vk = $('#vk');
     if (vk) vk.addEventListener('change', () => { state.viewKey = vk.value; drawSong(); });
@@ -1064,6 +1136,13 @@
       case 'add-to-set': openAddToSet(s); break;
       case 'share-song': openShare([s], `“${s.title}”`); break;
       case 'print': window.print(); break;
+      case 'flip-key': {
+        const flips = $$('.key-flip', main);
+        flips.forEach((f) => f.classList.add('flipped'));
+        clearTimeout(state.flipTimer);
+        state.flipTimer = setTimeout(() => flips.forEach((f) => f.classList.remove('flipped')), 3000);
+        break;
+      }
       case 'scroll': startScroll(); break;
       case 'metro': toggleMetro(); break;
       case 'stage': enterStage(); break;
@@ -1274,7 +1353,7 @@
   }
 
   /* ================= editor ================= */
-  const CHORD_BUTTONS = ['1', '2m', '3m', '4', '5', '6m', '7°', 'b7', '1/3', '5/7', '4/5', 'b7/5', '2', '5/2'];
+  const chordButtons = () => ['1', '2', '3', '4', '5', '6', '7', ...language.custom.map((c) => c.name).filter(Boolean), 'b7', '1/3', '5/7', '4/5', 'b7/5'];
 
   function viewEditor(id) {
     const existing = id ? byId(id) : null;
@@ -1310,7 +1389,7 @@
           <div class="card pane">
             <div class="pane-h"><h2>Lyrics &amp; chords</h2><button type="button" class="link" id="helpBtn">How to write chords</button></div>
             <div class="chordbar" id="cbar">
-              ${CHORD_BUTTONS.map((c) => `<button type="button" data-ins="[${esc(c)}]">${esc(c.replace(/^b/, '♭').replace('/b', '/♭'))}</button>`).join('')}
+              ${[...new Set(chordButtons())].map((c) => `<button type="button" data-ins="[${esc(c)}]">${esc(prettyName(c))}</button>`).join('')}
               <button type="button" data-ins="[]" data-back="1">[ ]</button>
               ${['♭', '♯', 'm', '7', '+', '°', '/'].map((x) => `<button type="button" class="symb" data-ins="${x}" title="Type ${x}">${x}</button>`).join('')}
               ${['Verse', 'Chorus', 'Bridge'].map((x) => `<button type="button" class="secb" data-ins="\n${x}\n">${x}</button>`).join('')}
@@ -1443,6 +1522,10 @@ Jesus is the answer</pre>
       <header class="topbar"><div class="tb-title"><h1>Settings</h1><p class="sub">Make it yours</p></div></header>
       <div class="content narrow">
         ${teamCardHTML()}
+        <section class="card"><h2>Chord language</h2>
+          <div class="srow"><div><b>How we name chords</b><small>${esc(languageSummary())}</small></div>
+            <button class="btn soft" id="langEdit">${icon('lock')}Edit</button></div>
+        </section>
         <section class="card"><h2>Appearance</h2>
           <div class="srow"><div><b>Theme</b><small>Follow your device, or choose one</small></div>
             ${seg('theme-set', prefs.theme, [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']])}</div>
@@ -1472,6 +1555,7 @@ Jesus is the answer</pre>
     $('#snd').addEventListener('click', () => { prefs.metroSound = !prefs.metroSound; savePrefs(); viewSettings(); });
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
     bindTeamCard();
+    $('#langEdit').addEventListener('click', unlockLanguage);
     $('#wipe')?.addEventListener('click', () => {
       if (!confirm('Erase ALL songs and setlists on this device? This cannot be undone. Share your library first if you want a backup.')) return;
       songs = []; setlists = []; prefs.favs = []; prefs.recent = [];
@@ -1844,6 +1928,7 @@ Jesus is the answer</pre>
       .on('postgres_changes', { event: '*', schema: 'public', table: 'songs', filter: f }, (p) => onRemote('songs', p.new))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'setlists', filter: f }, (p) => onRemote('setlists', p.new))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'team_members', filter: f }, () => loadMembers())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'teams', filter: `id=eq.${team.id}` }, (p) => { if (p.new && p.new.language) applyTeamLanguage(p.new.language); })
       .subscribe();
   }
 
@@ -1873,9 +1958,15 @@ Jesus is the answer</pre>
     try {
       setSync('syncing');
       const c = await cloud();
-      const { data: t, error } = await c.from('teams').select('id, name, join_code').eq('id', team.id).maybeSingle();
+      let { data: t, error } = await c.from('teams').select('id, name, join_code, language').eq('id', team.id).maybeSingle();
+      if (error && /language/.test(error.message)) {
+        sync.noLangColumn = true;
+        ({ data: t, error } = await c.from('teams').select('id, name, join_code').eq('id', team.id).maybeSingle());
+      }
       if (error) throw error;
       if (t) Object.assign(team, { name: t.name, code: t.join_code });
+      if (t && t.language) applyTeamLanguage(t.language);
+      else if (t && sync.langPending) pushLanguage();
       else {
         const { data: j, error: e2 } = await c.rpc('join_team', { code: team.code, my_name: team.myName });
         if (e2) throw new Error(/code/i.test(e2.message) ? 'This team’s code has changed. Ask your leader for the new one.' : e2.message);
@@ -2090,6 +2181,167 @@ Jesus is the answer</pre>
     }
   }
 
+  /* ---------- chord language: shared with the team, editable behind a password ---------- */
+  const LANG_PW = '480cb8618eddac6cdc3f7d449e59f440ba0b08fa6402e8af7a659c638512e118'; // SHA-256, not the password itself
+  const ROOTS = ['1', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
+  const qualLabel = (id) => (QUALITIES.find((q) => q[0] === id) || [, id])[1];
+
+  function languageSummary() {
+    const minors = Object.entries(language.plain).filter(([, q]) => q === 'min').map(([d]) => d);
+    const parts = [];
+    if (minors.length) parts.push(`${minors.join(', ')} are minor`);
+    for (const [d, q] of Object.entries(language.plain)) if (q !== 'min' && q !== 'maj') parts.push(`${d} is ${qualLabel(q).toLowerCase()}`);
+    if (language.custom.length) parts.push('special: ' + language.custom.map((c) => prettyName(c.name)).join(', '));
+    return parts.join(' · ');
+  }
+
+  function applyTeamLanguage(l) {
+    if (!l || !l.plain || !Array.isArray(l.custom)) return;
+    if ((l.updated || 0) <= (language.updated || 0)) { if ((language.updated || 0) > (l.updated || 0)) pushLanguage(); return; }
+    language = l;
+    writeJSON(LANG_KEY, language);
+    refreshView();
+  }
+
+  async function pushLanguage() {
+    if (!team) return;
+    sync.langPending = true;
+    if (!sync.client || sync.noLangColumn) {
+      if (sync.noLangColumn) toast('Saved on this phone. Run the small database update to share it with the team.');
+      return;
+    }
+    const { data, error } = await sync.client.from('teams').update({ language }).eq('id', team.id).select('id');
+    if (error) {
+      if (/language/.test(error.message)) { sync.noLangColumn = true; toast('Saved on this phone. Run the small database update to share it with the team.'); }
+      else toast('Saved on this phone. Could not share it yet: ' + error.message);
+      return;
+    }
+    sync.langPending = false;
+    if (!data || !data.length) toast('Saved on this phone. Only the team leader can change the team’s language.');
+  }
+
+  const isUnlocked = () => { try { return sessionStorage.getItem('stobite-chords:lang-unlocked') === '1'; } catch { return false; } };
+  async function sha256hex(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function unlockLanguage() {
+    if (isUnlocked()) { go('#/language'); return; }
+    const d = modal(`
+      <div class="chord-head"><div class="chord-big lockbig">${icon('lock')}</div>
+        <div><h2>Chord language</h2><p>Only the music director can change how chords are named.</p></div></div>
+      <div class="fields one"><label class="field">Password<input type="password" id="pw" autocomplete="current-password"></label></div>
+      <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form><button class="btn primary" id="pwGo">Unlock</button></div>`);
+    const input = $('#pw', d);
+    setTimeout(() => input.focus(), 50);
+    const tryIt = async () => {
+      if (!window.crypto || !crypto.subtle) { toast('Open the app from its https link to change this'); return; }
+      if ((await sha256hex(input.value)) === LANG_PW) {
+        try { sessionStorage.setItem('stobite-chords:lang-unlocked', '1'); } catch { /* ignore */ }
+        d.close();
+        go('#/language');
+      } else {
+        toast('That password isn’t right');
+        input.select();
+      }
+    };
+    $('#pwGo', d).addEventListener('click', tryIt);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); tryIt(); } });
+  }
+
+  function viewLanguage() {
+    if (!isUnlocked()) { go('#/settings'); return; }
+    document.title = 'Chord language · Stobite Chords';
+    const draft = JSON.parse(JSON.stringify(language));
+    state.langKey = state.langKey || 'F';
+    const qualOpts = (cur) => QUALITIES.map(([id, label]) => `<option value="${id}"${id === cur ? ' selected' : ''}>${label}</option>`).join('');
+    const rootOpts = (cur) => ROOTS.map((r) => `<option value="${r}"${normTok(cur) === r ? ' selected' : ''}>${prettyName(r)}</option>`).join('');
+    const example = (root, q) => {
+      const r = /^([b#]?)([1-7])$/.exec(normTok(root || ''));
+      const k = keyInfo(state.langKey);
+      if (!r || !k) return '';
+      const name = spellRoot(r[1], +r[2], k).name + prettyQual(QCODE[q] ?? '');
+      return `<b>${esc(name)}</b> ${esc(chordNotes(r[1], +r[2], QCODE[q] ?? '', k).map((n) => n.name).join(' '))}`;
+    };
+    main.innerHTML = `
+      <header class="topbar lined">
+        <a class="btn ghost" href="#/settings">${icon('chevL')}<span>Settings</span></a>
+        <div class="tb-title" style="text-align:center"><b>Chord language</b></div>
+        <div class="tb-actions"><button class="btn primary" id="langSave">Save</button></div>
+      </header>
+      <div class="content narrow" id="langWrap" style="padding-top:16px">
+        <div class="card lang-intro">
+          <p>${team ? `Saved changes apply to everyone in <b>${esc(team.name)}</b>.` : 'Saved changes apply on this device.'} Examples are shown in the key of
+            <select class="pill-select" id="langKey">${KEYS.map((k) => `<option value="${k}"${k === state.langKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></p>
+        </div>
+        <section class="card"><h2>A number on its own</h2>
+          <div class="lang-list" id="plainRows">${[1, 2, 3, 4, 5, 6, 7].map((d) => `
+            <div class="lang-row"><span class="num-badge">${d}</span>
+              <select data-plain="${d}">${qualOpts(draft.plain[d])}</select>
+              <span class="lang-ex" data-ex-plain="${d}">${example(String(d), draft.plain[d])}</span></div>`).join('')}
+          </div>
+        </section>
+        <section class="card"><h2>Special names</h2>
+          <p class="sub" style="margin-bottom:12px">A name the band says, and the chord it means. For example 1♯ = the 6 chord made major.</p>
+          <div class="lang-list" id="customRows"></div>
+          <button class="btn add-songs" id="addName">${icon('plus')}Add a name</button>
+        </section>
+        <div class="row" style="justify-content:space-between">
+          <button class="btn ghost" id="langReset">Reset to the band's defaults</button>
+          <button class="btn ghost" id="langLock">${icon('lock')}Lock</button>
+        </div>
+      </div>`;
+    const drawCustom = () => {
+      $('#customRows').innerHTML = draft.custom.map((c, i) => `
+        <div class="lang-row custom">
+          <input class="lang-name" data-cname="${i}" value="${esc(c.name)}" maxlength="8" placeholder="e.g. 2#" aria-label="Name">
+          <span class="eq">=</span>
+          <select data-croot="${i}" aria-label="Built on">${rootOpts(c.root)}</select>
+          <select data-cq="${i}" aria-label="Chord type">${qualOpts(c.quality)}</select>
+          <span class="lang-ex" data-ex-custom="${i}">${example(c.root, c.quality)}</span>
+          <button class="btn ghost icon-only danger" data-cdel="${i}" title="Remove">${icon('x')}</button>
+        </div>`).join('') || '<p class="sub">No special names yet.</p>';
+    };
+    const drawExamples = () => {
+      for (const d of [1, 2, 3, 4, 5, 6, 7]) $(`[data-ex-plain="${d}"]`).innerHTML = example(String(d), draft.plain[d]);
+      draft.custom.forEach((c, i) => { const el = $(`[data-ex-custom="${i}"]`); if (el) el.innerHTML = example(c.root, c.quality); });
+    };
+    drawCustom();
+    $('#langKey').addEventListener('change', (e) => { state.langKey = e.target.value; drawExamples(); });
+    $('#langWrap').addEventListener('change', (e) => {
+      const t = e.target;
+      if (t.dataset.plain) { draft.plain[t.dataset.plain] = t.value; drawExamples(); }
+      else if (t.dataset.croot) { draft.custom[+t.dataset.croot].root = t.value; drawExamples(); }
+      else if (t.dataset.cq) { draft.custom[+t.dataset.cq].quality = t.value; drawExamples(); }
+    });
+    $('#langWrap').addEventListener('input', (e) => { if (e.target.dataset.cname) draft.custom[+e.target.dataset.cname].name = e.target.value.trim(); });
+    $('#customRows').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cdel]');
+      if (b) { draft.custom.splice(+b.dataset.cdel, 1); drawCustom(); }
+    });
+    $('#addName').addEventListener('click', () => { draft.custom.push({ name: '', root: '1', quality: 'maj' }); drawCustom(); $$('.lang-name').pop()?.focus(); });
+    $('#langReset').addEventListener('click', () => {
+      if (!confirm('Put the chord language back to the defaults?')) return;
+      Object.assign(draft, JSON.parse(JSON.stringify(DEFAULT_LANGUAGE)));
+      $$('[data-plain]').forEach((el) => { el.value = draft.plain[el.dataset.plain]; });
+      drawCustom(); drawExamples();
+    });
+    $('#langLock').addEventListener('click', () => { try { sessionStorage.removeItem('stobite-chords:lang-unlocked'); } catch { /* ignore */ } go('#/settings'); });
+    $('#langSave').addEventListener('click', () => {
+      draft.custom = draft.custom.filter((c) => c.name);
+      const names = draft.custom.map((c) => normTok(c.name));
+      const bad = draft.custom.find((c) => !/^[b#]?[1-7]/.test(normTok(c.name)) || /^[1-7]$/.test(normTok(c.name)) || c.name.includes('/'));
+      if (bad) { toast(`“${bad.name}” needs to start with a number and add something, like 2# or 5m`); return; }
+      if (new Set(names).size !== names.length) { toast('Two special names are the same'); return; }
+      language = { ...draft, updated: Date.now() };
+      writeJSON(LANG_KEY, language);
+      pushLanguage();
+      toast('Chord language saved');
+      go('#/settings');
+    });
+  }
+
   window.addEventListener('online', () => startSync());
   window.addEventListener('offline', () => { if (team) setSync('offline'); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && team && sync.client) startSync(); });
@@ -2112,24 +2364,21 @@ Jesus is the answer</pre>
   }
 
   /* ---------- chord sheet: tap a chord to see its notes ---------- */
-  const prettyDeg = (d) => d.replace(/^b/, '♭').replace(/^#/, '♯');
   function openChord(tok, songKey, viewKey) {
     const sp = spellChord(tok, songKey, viewKey);
     if (!sp) return;
     const o = { mode: prefs.mode, part: 'keys', songKey, viewKey };
-    const keyName = prettyKey(viewKey || songKey || 'C');
     modal(`
       <div class="chord-head">
         <div class="chord-big">${chordHTML(tok, o)}</div>
-        <div><h2>${esc(sp.name)}${sp.bass ? ` <span class="over">over ${esc(sp.bass.name)}</span>` : ''}</h2><p>Key of ${esc(keyName)} · ${sp.notes.length} notes</p></div>
+        <div><h2>${esc(sp.name)}${sp.bass ? ` <span class="over">over ${esc(sp.bass.name)}</span>` : ''}</h2><p>Key of ${esc(prettyKey(viewKey || songKey || 'C'))}</p></div>
       </div>
       ${pianoSVG(sp)}
-      <div class="notes">${sp.notes.map((n, i) => `
-        <div class="note-chip${i === 0 ? ' root' : ''}"><b>${esc(n.name)}</b><span>${esc(prettyDeg(n.degree))} · ${esc(n.solfa)}</span><small>${i === 0 ? 'root' : esc(n.label)}</small></div>`).join('')}
-      </div>
-      ${sp.bass ? `<div class="bass-line"><i></i>Bass plays <b>${esc(sp.bass.name)}</b> &nbsp;(${esc(prettyDeg(sp.bass.degree))} · ${esc(sp.bass.solfa)})</div>` : ''}
+      <div class="notes">${sp.notes.map((n, i) => `<div class="note-chip${i === 0 ? ' first' : ''}"><b>${esc(n.name)}</b></div>`).join('')}</div>
+      ${sp.bass ? `<div class="bass-line"><i></i>Bass plays <b>${esc(sp.bass.name)}</b></div>` : ''}
       <div class="row"><form method="dialog"><button class="btn primary">Done</button></form></div>`, 'sheet');
   }
+
 
   // Keep the screen awake while a song is open (phones on a music stand).
   async function requestWake() {

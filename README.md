@@ -28,7 +28,8 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 
 - Songs with key, tempo, time signature, tags and notes. You can search, filter by tag, sort, and mark favourites.
 - Chords as numbers, sol-fa (do de re ma mi fa fi so zi la ta ti) or letters, with a transpose picker.
-- Tap any chord to see its notes on a keyboard, with numbers and sol-fa.
+- Tap any chord to see its letter name and notes on a keyboard, in the key being played.
+- In a setlist the song shows the key you're playing in. Tap the key to flip to the original.
 - Delete a song from its page, or tap Select in the library to delete several at once (with Undo).
 - Keys, Bass (bass note only) or Lyrics-only view.
 - Setlists with a date, notes and a key per song. Swipe or use the ←/→ keys to move between songs.
@@ -43,6 +44,7 @@ Keyboard: Space = scroll, ←/→ = next/previous song in a setlist, M = metrono
 
 - Inline: `[1]Jesus is the [7]answer`
 - Or chords on the line above, lined up with spaces
+- The band's chord language: a plain 2, 3 or 6 is minor, 7 is diminished, and special names such as 4m, 1♯ (6 made major), 4♯ (2 made major), 5♯ (3 made major) and 6♯ (2 with a raised 5th) are set in Settings → Chord language (password-locked, shared with the team).
 - Numbers `1`–`7`, with `m`, `7`, `sus4`, `+`/`aug`, `°`/`dim` and so on. Flats and sharps go before or after the number (`♭7`, `6♭`, `5♯`). Typing `flat` or `sharp` turns into ♭ / ♯. Use a slash for the bass note (`1/5`, `♭7/5`).
 - Letter chords (`G`, `C/E`) are converted to numbers using the song key when you save.
 - Section lines: `Verse 1`, `Chorus`, `Bridge`, `{Anything}`. A line starting with `#` is a note.

@@ -153,3 +153,10 @@ begin
   begin alter publication supabase_realtime add table public.setlists; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.team_members; exception when duplicate_object then null; end;
 end $$;
+
+-- ---------- update 2: the band's chord language, shared with the whole team ----------
+alter table public.teams add column if not exists language jsonb;
+do $$
+begin
+  begin alter publication supabase_realtime add table public.teams; exception when duplicate_object then null; end;
+end $$;
