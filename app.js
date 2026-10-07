@@ -1992,7 +1992,7 @@ Jesus is the answer</pre>
       if (error) throw error;
       if (t) Object.assign(team, { name: t.name, code: t.join_code });
       if (t && t.language) applyTeamLanguage(t.language);
-      else if (t && sync.langPending) pushLanguage();
+      else if (t && (sync.langPending || (language.updated || 0) > 0)) pushLanguage();
       else {
         const { data: j, error: e2 } = await c.rpc('join_team', { code: team.code, my_name: team.myName });
         if (e2) throw new Error(/code/i.test(e2.message) ? 'This team’s code has changed. Ask your leader for the new one.' : e2.message);
@@ -2000,6 +2000,7 @@ Jesus is the answer</pre>
       }
       writeJSON(TEAM_KEY, team);
       await pullAll();
+      await backfillPlayKeys();
       subscribe();
       loadMembers();
       await pushDirty();
@@ -2008,6 +2009,18 @@ Jesus is the answer</pre>
     } catch (err) {
       setSync(navigator.onLine ? 'error' : 'offline', err.message || String(err));
     }
+  }
+
+  /** Once per team: send "we play it in" keys that were saved before the database had room for them. */
+  async function backfillPlayKeys() {
+    const flag = spaceKey('playkey-backfill');
+    if (readJSON(flag, false)) return;
+    const withKey = songs.filter((x) => x.playKey);
+    if (withKey.length) {
+      const { error } = await sync.client.from('songs').upsert(withKey.map(songToRow), { onConflict: 'team_id,id' });
+      if (error) { if (/play_key/.test(error.message)) sync.noPlayKey = true; return; }
+    }
+    writeJSON(flag, true);
   }
 
   /** Re-draw whatever is on screen after a teammate's change (never mid-typing). */
