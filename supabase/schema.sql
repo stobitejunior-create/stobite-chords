@@ -160,3 +160,6 @@ do $$
 begin
   begin alter publication supabase_realtime add table public.teams; exception when duplicate_object then null; end;
 end $$;
+
+-- ---------- update 3: the key the band plays each song in ----------
+alter table public.songs add column if not exists play_key text not null default '' check (char_length(play_key) <= 8);

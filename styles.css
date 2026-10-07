@@ -631,3 +631,22 @@ select.si-key { padding: 6px 28px 6px 10px; background-position: right 8px cente
 .stat.key-flip .flip, .stat.key-flip .face { font-size: inherit; font-weight: inherit; letter-spacing: 0; text-transform: none; opacity: 1; }
 .stat.key-flip .face > span { font-size: 11px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; opacity: .8; }
 .key-chip { padding: 0 14px; }
+
+/* no double-tap zoom (taps still register instantly) */
+html, body, button, a, select, .ch { touch-action: manipulation; }
+
+/* ============ transpose picker ============ */
+.tp-wrap { position: relative; display: inline-flex; align-items: center; flex: none; }
+.tp-wrap .ic { position: absolute; left: 12px; width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+.tp-wrap select.tp { padding-left: 34px; font-weight: 800; color: var(--text); }
+.tp-wrap.moved select.tp { border-color: var(--chord); color: var(--chord); background-color: color-mix(in srgb, var(--chord) 10%, var(--surface)); }
+.tp-wrap.moved .ic { color: var(--chord); }
+.stat .mine { font-size: 11.5px; font-weight: 800; background: rgb(255 255 255 / .22); border-radius: 999px; padding: 1px 7px; margin-top: 3px; align-self: flex-start; }
+.stat .mine:empty { display: none; }
+
+/* ============ full-screen bar: size + close, with room to breathe ============ */
+.stage-dock { gap: 10px; padding: 6px 6px 6px 16px; }
+.stage-dock .dt.title { text-align: left; }
+.stage-dock .dt.title small { display: inline; font-size: 12px; opacity: .6; letter-spacing: 0; text-transform: none; margin-left: 4px; }
+.stage-dock .size-pair { display: inline-flex; gap: 8px; padding: 0 4px; }
+.stage-dock .db { width: 46px; height: 46px; font-size: 17px; }

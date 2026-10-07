@@ -28,6 +28,7 @@
     down: '<path d="m6 9 6 6 6-6"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
+    transpose: '<path d="M7 4v16M7 4 3 8M7 4l4 4M17 20V4M17 20l-4-4M17 20l4-4"/>',
     lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
@@ -541,7 +542,7 @@
   const stripChords = (t) => String(t || '').replace(/\[[^\]]*\]/g, '');
 
   /* ================= shell ================= */
-  const state = { route: null, query: '', tag: null, selecting: false, selected: new Set(), visible: [], song: null, set: null, setIdx: 0, viewKey: null, viewKeyFor: null, scrollMode: false, wake: null };
+  const state = { part: prefs.part, route: null, query: '', tag: null, selecting: false, selected: new Set(), visible: [], song: null, set: null, setIdx: 0, viewKey: null, viewKeyFor: null, scrollMode: false, wake: null };
 
   $('#app').innerHTML = `
     <aside class="side" id="side"></aside>
@@ -778,12 +779,19 @@
 
   /* ================= song view ================= */
   function viewOpts(s) {
-    const key = songKeyInContext(s);
-    return { mode: prefs.mode, part: prefs.part, songKey: s.key, viewKey: prefs.mode === 'letters' ? state.viewKey : key };
+    return { mode: prefs.mode, part: state.part, songKey: s.key, viewKey: myKey(s) };
   }
+  /** The key the band plays the song in: the setlist's key, else the song's "we play it in", else the original. */
   function songKeyInContext(s) {
     const item = state.set && state.set.items[state.setIdx];
-    return (item && item.key) || s.key;
+    return (item && item.key) || s.playKey || s.key;
+  }
+  const KEY_BY_SEMI = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+  function keyFromSemi(semi, minor) { return KEY_BY_SEMI[((semi % 12) + 12) % 12] + (minor ? 'm' : ''); }
+  /** My key: the band's key moved by my personal transposition for this song (kept on this device only). */
+  function myKey(s) {
+    const band = songKeyInContext(s), k = keyInfo(band), shift = (prefs.shift || {})[s.id] || 0;
+    return k && shift ? keyFromSemi(k.semi + shift, k.minor) : band;
   }
 
   function pushRecent(id) {
@@ -806,7 +814,7 @@
     state.song = s; state.set = set; state.setIdx = idx;
     pushRecent(s.id);
     const ctx = set ? `${set.id}:${idx}` : s.id;
-    if (state.viewKeyFor !== ctx) { state.viewKey = songKeyInContext(s); state.viewKeyFor = ctx; }
+    state.viewKeyFor = ctx;
     const key = songKeyInContext(s);
     const fav = isFav(s.id);
     const prev = set && idx > 0 ? byId(set.items[idx - 1].songId) : null;
@@ -834,7 +842,7 @@
           </div>
           <div class="stats">
             <button class="stat stat-btn key-flip" data-act="flip-key" title="Tap to see the original key">
-              <span class="flip"><span class="face"><span>Key</span><b>${esc(prettyKey(key) || '—')}</b></span>
+              <span class="flip"><span class="face"><span>Key</span><b>${esc(prettyKey(key) || '—')}</b><small class="mine" id="mineKey"></small></span>
               <span class="face back"><span>Original</span><b>${esc(prettyKey(s.key) || '—')}</b></span></span></button>
             <button class="stat stat-btn" data-act="metro" title="Start metronome"><span>Tempo</span><b>${esc(s.tempo || '—')}<small> bpm</small></b><i class="beat" id="heroBeat"></i></button>
             <div class="stat"><span>Time</span><b>${esc(s.time || '—')}</b></div>
@@ -860,37 +868,43 @@
   function drawSong() {
     const s = state.song;
     if (!s) return;
-    const k = keyInfo(s.key);
-    const sameKind = KEYS.filter((x) => keyInfo(x).minor === (k ? k.minor : false));
-    if (state.viewKey && !sameKind.includes(state.viewKey)) sameKind.unshift(state.viewKey);
-    const lyrics = prefs.part === 'lyrics';
-    const playKey = viewOpts(s).viewKey || s.key;
+    const band = songKeyInContext(s), bk = keyInfo(band), mine = myKey(s);
+    const lyrics = state.part === 'lyrics';
+    const keyOpts = bk ? KEY_BY_SEMI.map((x) => {
+      const kk = x + (bk.minor ? 'm' : '');
+      const tags = [kk === band ? 'band' : '', kk === s.key && kk !== band ? 'original' : ''].filter(Boolean).join(', ');
+      return `<option value="${esc(kk)}"${kk === mine ? ' selected' : ''}>${esc(prettyKey(kk))}${tags ? ` (${tags})` : ''}</option>`;
+    }).join('') : '';
     $('#controls').innerHTML = `
-      ${playKey ? `<button class="tool key-chip key-flip" data-act="flip-key" title="Tap to see the original key">
-        <span class="flip"><span class="face">Key <b>${esc(prettyKey(playKey))}</b></span><span class="face back">Original <b>${esc(prettyKey(s.key))}</b></span></span></button>` : ''}
-      <div class="seg part" role="group" aria-label="Show chords for">
-        ${[['keys', 'piano', 'Keys'], ['bass', 'guitar', 'Bass'], ['lyrics', 'mic', 'Lyrics']].map(([v, ic, l]) =>
-          `<button data-part="${v}" aria-pressed="${prefs.part === v}">${icon(ic)}${l}</button>`).join('')}
-      </div>
+      ${bk ? `<label class="tp-wrap${mine !== band ? ' moved' : ''}" title="Transpose for me (only on this device)">${icon('transpose')}<select class="pill-select tp" id="tp" aria-label="Transpose for me">${keyOpts}</select></label>` : ''}
       ${lyrics ? '' : `<div class="seg" role="group" aria-label="Chord names">
         ${[['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']].map(([v, l]) =>
           `<button data-mode="${v}" aria-pressed="${prefs.mode === v}">${l}</button>`).join('')}
       </div>`}
-      ${!lyrics && prefs.mode === 'letters' && k ? `<select class="pill-select" id="vk" aria-label="Play in key">${sameKind.map((x) =>
-        `<option value="${esc(x)}"${x === state.viewKey ? ' selected' : ''}>Key ${esc(prettyKey(x))}${x === s.key ? ' ★' : ''}</option>`).join('')}</select>` : ''}
       <div class="seg" role="group" aria-label="Text size"><button data-size="-2" aria-label="Smaller text">A−</button><button data-size="2" aria-label="Bigger text">A+</button></div>
-      <button class="tool${state.scrollMode ? ' on' : ''}" data-act="scroll" title="Auto-scroll (space)">${icon('scroll')}<span class="hide-sm">Scroll</span></button>
-      <button class="tool${metro.on ? ' on' : ''}" data-act="metro" title="Metronome (M)">${icon('metro')}<span class="hide-sm">Click</span></button>
-      <button class="tool" data-act="stage" title="Stage mode (F)">${icon('stage')}<span class="hide-sm">Stage</span></button>`;
-    document.body.classList.toggle('bass', prefs.part === 'bass');
+      <button class="tool" data-act="stage" title="Full screen (F)">${icon('stage')}<span class="hide-sm">Full screen</span></button>
+      <div class="seg part" role="group" aria-label="Show chords for">
+        ${[['keys', 'piano', 'Keys'], ['bass', 'guitar', 'Bass'], ['lyrics', 'mic', 'Lyrics']].map(([v, ic, l]) =>
+          `<button data-part="${v}" aria-pressed="${state.part === v}">${icon(ic)}${l}</button>`).join('')}
+      </div>`;
+    const mk = $('#mineKey');
+    if (mk) mk.textContent = mine !== band ? `You: ${prettyKey(mine)}` : '';
+    document.body.classList.toggle('bass', state.part === 'bass');
     document.body.classList.toggle('lyrics', lyrics);
     document.documentElement.style.setProperty('--lyric', prefs.size + 'px');
     const o = viewOpts(s);
     const used = lyrics ? [] : chordsUsed(s.chart, o);
-    $('#used').innerHTML = used.length ? `<span>${prefs.part === 'bass' ? 'Bass notes' : 'Chords'}</span>${used.join('')}` : '';
+    $('#used').innerHTML = used.length ? `<span>${state.part === 'bass' ? 'Bass notes' : 'Chords'}</span>${used.join('')}` : '';
     $('#chart').innerHTML = renderChart(s.chart, o) || '<p class="sub">This song has no lyrics yet. Tap Edit to add them.</p>';
-    const vk = $('#vk');
-    if (vk) vk.addEventListener('change', () => { state.viewKey = vk.value; drawSong(); });
+    $('#tp')?.addEventListener('change', (e) => {
+      const target = keyInfo(e.target.value);
+      prefs.shift = prefs.shift || {};
+      const d = target && bk ? (((target.semi - bk.semi) % 12) + 18) % 12 - 6 : 0; // nearest way up or down
+      if (d) prefs.shift[s.id] = d; else delete prefs.shift[s.id];
+      savePrefs();
+      drawSong();
+      toast(d ? `Transposed to ${prettyKey(e.target.value)} for you` : 'Back to the band’s key');
+    });
   }
 
   function setStep(delta) {
@@ -1026,12 +1040,10 @@
     const g = [];
     if (inSong && document.body.classList.contains('stage')) {
       const set = state.set, i = state.setIdx;
-      g.push(`<div class="dg">
-        ${set ? `<button class="db" data-d="prev" ${i <= 0 ? 'disabled' : ''} title="Previous song">${icon('chevL')}</button>` : ''}
-        <span class="dt title">${esc(state.song.title)}</span>
-        ${set ? `<button class="db" data-d="next" ${i >= set.items.length - 1 ? 'disabled' : ''} title="Next song">${icon('chevR')}</button>` : ''}
-        <button class="db" data-d="size-" title="Smaller">A−</button><button class="db" data-d="size+" title="Bigger">A+</button>
-        <button class="db" data-d="stage-off" title="Exit stage mode">${icon('x')}</button></div>`);
+      g.push(`<div class="dg stage-dock">
+        <span class="dt title">${esc(state.song.title)}${set ? ` <small>${i + 1} / ${set.items.length}</small>` : ''}</span>
+        <span class="size-pair"><button class="db" data-d="size-" title="Smaller text">A−</button><button class="db" data-d="size+" title="Bigger text">A+</button></span>
+        <button class="db" data-d="stage-off" title="Leave full screen">${icon('x')}</button></div>`);
     }
     if (inSong && state.scrollMode) {
       g.push(`<div class="dg">
@@ -1110,7 +1122,11 @@
     const s = state.song;
     const inSong = state.route && state.route.name === 'song';
     if (b.dataset.mode) { prefs.mode = b.dataset.mode; savePrefs(); inSong ? drawSong() : viewSettings(); return; }
-    if (b.dataset.part) { prefs.part = b.dataset.part; savePrefs(); inSong ? drawSong() : viewSettings(); return; }
+    if (b.dataset.part) {
+      state.part = b.dataset.part;
+      if (!inSong) { prefs.part = b.dataset.part; savePrefs(); viewSettings(); } else drawSong();
+      return;
+    }
     if (b.dataset.size) { changeSize(+b.dataset.size); if (!inSong) viewSettings(); return; }
     if (b.dataset.themeSet) { prefs.theme = b.dataset.themeSet; savePrefs(); applyTheme(); viewSettings(); return; }
     switch (b.dataset.act) {
@@ -1138,9 +1154,10 @@
       case 'print': window.print(); break;
       case 'flip-key': {
         const flips = $$('.key-flip', main);
-        flips.forEach((f) => f.classList.add('flipped'));
+        const show = !flips.some((f) => f.classList.contains('flipped'));
+        flips.forEach((f) => f.classList.toggle('flipped', show));
         clearTimeout(state.flipTimer);
-        state.flipTimer = setTimeout(() => flips.forEach((f) => f.classList.remove('flipped')), 3000);
+        if (show) state.flipTimer = setTimeout(() => flips.forEach((f) => f.classList.remove('flipped')), 3000);
         break;
       }
       case 'scroll': startScroll(); break;
@@ -1362,7 +1379,7 @@
     const keys = KEYS.includes(s.key) ? KEYS : [s.key, ...KEYS];
     const times = TIMES.includes(s.time) ? TIMES : [s.time, ...TIMES];
     document.title = `${existing ? 'Edit' : 'New song'} · Stobite Chords`;
-    document.body.classList.toggle('bass', prefs.part === 'bass');
+    document.body.classList.toggle('bass', state.part === 'bass');
     main.innerHTML = `
       <header class="topbar lined">
         <a class="btn ghost" href="${existing ? '#/s/' + enc(id) : '#/'}">${icon('x')}<span>Cancel</span></a>
@@ -1377,7 +1394,8 @@
           <div class="fields">
             <label class="field full">Title<input name="title" required value="${esc(s.title)}" placeholder="Song title"></label>
             <label class="field full">Artist / writer<input name="artist" value="${esc(s.artist)}" placeholder="Who wrote or sings it"></label>
-            <label class="field">Key<select name="key">${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
+            <label class="field">Original key<select name="key">${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
+            <label class="field">We play it in<select name="playKey"><option value="">Same as original</option>${keys.map((k) => `<option value="${esc(k)}"${k === s.playKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <div class="field">Tempo (bpm)<div class="with-btn"><input name="tempo" type="number" inputmode="numeric" min="20" max="300" value="${esc(s.tempo)}" placeholder="72" aria-label="Tempo"><button type="button" class="btn soft" id="tap" title="Tap along to the beat">${icon('hand')}Tap</button></div></div>
             <label class="field time">Time<select name="time">${times.map((t) => `<option${t === s.time ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
             <div class="field full">Tags<input name="tags" value="${esc((s.tags || []).join(', '))}" placeholder="Worship, Communion…" autocomplete="off">
@@ -1397,7 +1415,7 @@
             <textarea id="chartInput" spellcheck="false" autocapitalize="sentences" placeholder="Verse 1&#10;[1]Jesus is the [7]answer&#10;&#10;— or put the chords on the line above —&#10;&#10;1                   7&#10;Jesus is the answer">${esc(s.chart)}</textarea>
           </div>
           <div class="card pane preview-card">
-            <div class="pane-h"><h2>Preview</h2><span class="sub">${prefs.part === 'bass' ? 'Bass view' : prefs.part === 'lyrics' ? 'Lyrics view' : 'Keys view'} · ${{ numbers: 'numbers', solfa: 'solfa', letters: 'letters' }[prefs.mode]}</span></div>
+            <div class="pane-h"><h2>Preview</h2><span class="sub">${state.part === 'bass' ? 'Bass view' : state.part === 'lyrics' ? 'Lyrics view' : 'Keys view'} · ${{ numbers: 'numbers', solfa: 'solfa', letters: 'letters' }[prefs.mode]}</span></div>
             <div class="chart preview" id="preview"></div>
           </div>
         </div>
@@ -1421,7 +1439,7 @@ Jesus is the answer</pre>
     const f = $('#f'), ta = $('#chartInput'), pv = $('#preview');
     const draw = () => {
       const key = f.key.value;
-      pv.innerHTML = renderChart(ta.value, { mode: prefs.mode, part: prefs.part, songKey: key, viewKey: key })
+      pv.innerHTML = renderChart(ta.value, { mode: prefs.mode, part: state.part, songKey: key, viewKey: key })
         || '<p class="sub">Your chart will show here as you type.</p>';
     };
     // Typing "flat" or "sharp" inside a chord turns into ♭ / ♯ straight away (lyrics are left alone).
@@ -1501,6 +1519,7 @@ Jesus is the answer</pre>
         title, artist: f.artist.value.trim(), key,
         tempo: f.tempo.value ? Math.round(+f.tempo.value) : '',
         time: f.time.value, info: f.info.value.trim(), chart: text, tags: [...new Set(parseTags())], updated: Date.now(),
+        playKey: f.playKey.value && f.playKey.value !== key ? f.playKey.value : '',
       };
       let sid;
       if (existing) { Object.assign(existing, data); sid = existing.id; }
@@ -1535,7 +1554,7 @@ Jesus is the answer</pre>
         <section class="card"><h2>Charts</h2>
           <div class="srow"><div><b>Chord names</b><small>How chords are written</small></div>
             ${seg('mode', prefs.mode, [['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']])}</div>
-          <div class="srow"><div><b>I'm playing</b><small>Bass shows only the bass note (1/5 → 5)</small></div>
+          <div class="srow"><div><b>My default view</b><small>What opens for you on this device. Bass shows only the bass note (1/5 → 5)</small></div>
             ${seg('part', prefs.part, [['keys', 'Keys'], ['bass', 'Bass'], ['lyrics', 'Lyrics']])}</div>
           <div class="srow"><div><b>Metronome click</b><small>Off = flashing light only</small></div>
             <button class="switch" role="switch" id="snd" aria-checked="${prefs.metroSound}" aria-label="Metronome click sound"></button></div>
@@ -1567,7 +1586,7 @@ Jesus is the answer</pre>
   const APP_ID = 'stobite-chords';
   const cleanSong = (s) => ({
     id: s.id, title: s.title, artist: s.artist || '', key: s.key || '', tempo: s.tempo || '', time: s.time || '',
-    info: s.info || '', tags: s.tags || [], chart: s.chart || '', updated: s.updated || 0,
+    info: s.info || '', tags: s.tags || [], chart: s.chart || '', updated: s.updated || 0, playKey: s.playKey || '',
   });
   const cleanSet = (s) => ({ id: s.id, name: s.name, date: s.date || '', notes: s.notes || '', items: s.items.map((i) => ({ songId: i.songId, key: i.key || '' })), updated: s.updated || 0 });
   const pack = (list, sets = []) => ({ app: APP_ID, version: 2, exported: new Date().toISOString(), songs: list.map(cleanSong), setlists: sets.map(cleanSet) });
@@ -1684,6 +1703,7 @@ Jesus is the answer</pre>
       info: String(s.info || ''),
       tags: Array.isArray(s.tags) ? s.tags.map(String).slice(0, 20) : [],
       chart: String(s.chart ?? s.lyrics ?? ''),
+      playKey: String(s.playKey || '').slice(0, 8),
       updated: Number(s.updated) || 0,
     }));
     const outSets = (Array.isArray(obj?.setlists) ? obj.setlists : [])
@@ -1827,9 +1847,11 @@ Jesus is the answer</pre>
     team_id: team.id, id: s.id, title: (s.title || '').slice(0, 200), artist: (s.artist || '').slice(0, 200), key: (s.key || '').slice(0, 8),
     tempo: Number(s.tempo) ? Math.round(Number(s.tempo)) : null, time: (s.time || '').slice(0, 8), info: s.info || '', tags: s.tags || [],
     chart: s.chart || '', updated: s.updated || 0, deleted: false,
+    ...(sync.noPlayKey ? {} : { play_key: (s.playKey || '').slice(0, 8) }),
   });
   const rowToSong = (r) => ({
     id: r.id, title: r.title, artist: r.artist, key: r.key, tempo: r.tempo ?? '', time: r.time, info: r.info, tags: r.tags || [], chart: r.chart, updated: Number(r.updated) || 0,
+    playKey: r.play_key ?? (byId(r.id) || {}).playKey ?? '',
   });
   const setToRow = (st) => ({
     team_id: team.id, id: st.id, name: (st.name || '').slice(0, 200), date: (st.date || '').slice(0, 10), notes: st.notes || '',
@@ -1896,7 +1918,11 @@ Jesus is the answer</pre>
         for (const [table, rows, marks] of [['songs', songRows, synced.songs], ['setlists', setRows, synced.sets]]) {
           for (let i = 0; i < rows.length; i += 200) {
             const chunk = rows.slice(i, i + 200);
-            const { error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' });
+            let { error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' });
+            if (error && table === 'songs' && /play_key/.test(error.message)) {
+              sync.noPlayKey = true; // database not updated yet: sync everything else
+              ({ error } = await sync.client.from(table).upsert(chunk.map(({ play_key, ...rest }) => rest), { onConflict: 'team_id,id' }));
+            }
             if (error) throw error;
             for (const r of chunk) marks[r.id] = { u: r.updated, d: r.deleted };
           }
@@ -2388,6 +2414,10 @@ Jesus is the answer</pre>
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && state.route && state.route.name === 'song') { state.wake = null; requestWake(); }
   });
+
+  // No accidental zooming while playing (iOS ignores the viewport setting, so block the gestures too).
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
   window.addEventListener('hashchange', route);
   route();
