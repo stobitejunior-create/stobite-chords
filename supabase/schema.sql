@@ -163,3 +163,36 @@ end $$;
 
 -- ---------- update 3: the key the band plays each song in ----------
 alter table public.songs add column if not exists play_key text not null default '' check (char_length(play_key) <= 8);
+
+-- ---------- update 4: admin password checked inside the database ----------
+-- The password's fingerprint lives only in this table, which the app cannot read.
+-- Set or change it in the SQL Editor (not saved in this file):
+--   insert into public.app_admin (id, password_hash) values (1, encode(sha256(convert_to('YOUR PASSWORD', 'UTF8')), 'hex'))
+--   on conflict (id) do update set password_hash = excluded.password_hash;
+create table if not exists public.app_admin (
+  id int primary key default 1 check (id = 1),
+  password_hash text not null
+);
+alter table public.app_admin enable row level security; -- no policies: nobody can read it through the app
+
+create or replace function public.check_admin(pw text) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare ok boolean;
+begin
+  select exists (select 1 from app_admin where password_hash = encode(sha256(convert_to(coalesce(pw, ''), 'UTF8')), 'hex')) into ok;
+  if not ok then perform pg_sleep(1); end if; -- slows down guessing
+  return ok;
+end $$;
+
+-- Lets the music director take the leader role back (e.g. after reinstalling the app on a phone).
+create or replace function public.claim_leader(t uuid, pw text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'Not signed in'; end if;
+  if not check_admin(pw) then raise exception 'Wrong password'; end if;
+  if not is_member(t) then raise exception 'Join the team first'; end if;
+  update team_members set role = 'leader' where team_id = t and user_id = auth.uid();
+end $$;
+
+revoke all on function public.check_admin(text), public.claim_leader(uuid, text) from public, anon;
+grant execute on function public.check_admin(text), public.claim_leader(uuid, text) to authenticated;

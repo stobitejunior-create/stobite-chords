@@ -2209,7 +2209,11 @@ Jesus is the answer</pre>
           <span><b>${esc(m.display_name)}${m.user_id === sync.userId ? ' (you)' : ''}</b><small>${m.role === 'leader' ? 'Leader' : 'Member'}</small></span>
           ${leader && m.user_id !== sync.userId ? `<button class="btn ghost icon-only danger" data-rm-member="${esc(m.user_id)}" title="Remove from team">${icon('x')}</button>` : ''}
         </div>`).join('') : '<p class="sub">Loading members…</p>'}</div>
-      <div class="team-actions"><button class="btn" id="tSync">${icon('scroll')}Sync now</button><button class="btn danger" id="tLeave">Leave team</button></div>
+      <div class="team-actions">
+        ${leader ? '' : `<button class="btn soft" id="tClaim">${icon('lock')}Make me leader</button>`}
+        <button class="btn" id="tSync">${icon('scroll')}Sync now</button><button class="btn danger" id="tLeave">Leave team</button>
+      </div>
+      <p class="team-note">Removing the app from your home screen signs this phone out. The team's songs stay safe: rejoin with the code${leader ? ', then use Make me leader with the admin password' : ''}.</p>
     </section>`;
   }
 
@@ -2218,6 +2222,7 @@ Jesus is the answer</pre>
     $('#tJoin')?.addEventListener('click', () => openJoinTeam());
     $('#tLeave')?.addEventListener('click', openLeaveTeam);
     $('#tSync')?.addEventListener('click', () => startSync());
+    $('#tClaim')?.addEventListener('click', claimLeader);
     $('#tInvite')?.addEventListener('click', async () => {
       const text = `Join ${team.name} on Stobite Chords: ${inviteLink()}  (team code ${prettyCode(team.code)})`;
       try {
@@ -2244,7 +2249,6 @@ Jesus is the answer</pre>
   }
 
   /* ---------- chord language: shared with the team, editable behind a password ---------- */
-  const LANG_PW = '480cb8618eddac6cdc3f7d449e59f440ba0b08fa6402e8af7a659c638512e118'; // SHA-256, not the password itself
   const ROOTS = ['1', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
   /** What a special name sounds like in sol-fa if nobody has named it: 1# -> do♯. */
   function solfaGuess(name) {
@@ -2288,33 +2292,58 @@ Jesus is the answer</pre>
   }
 
   const isUnlocked = () => { try { return sessionStorage.getItem('stobite-chords:lang-unlocked') === '1'; } catch { return false; } };
-  async function sha256hex(text) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  /** Ask the database whether this is the admin password (it's never stored in the app). */
+  async function checkAdmin(pw) {
+    const c = await cloud();
+    const { data, error } = await c.rpc('check_admin', { pw });
+    if (error) throw new Error(/check_admin|function/i.test(error.message) ? 'The database needs its latest update first' : error.message);
+    return data === true;
+  }
+
+  /** Password prompt for admin-only actions. onOk(password) runs after the database accepts it. */
+  function askAdminPassword(title, text, onOk) {
+    const d = modal(`
+      <div class="chord-head"><div class="chord-big lockbig">${icon('lock')}</div>
+        <div><h2>${esc(title)}</h2><p>${esc(text)}</p></div></div>
+      <div class="fields one"><label class="field">Admin password<input type="password" id="pw" autocomplete="current-password"></label></div>
+      <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form><button class="btn primary" id="pwGo">Unlock</button></div>`);
+    const input = $('#pw', d), go1 = $('#pwGo', d);
+    setTimeout(() => input.focus(), 50);
+    const tryIt = async () => {
+      if (!cloudReady()) { toast('Needs the online version of the app'); return; }
+      go1.disabled = true; go1.textContent = 'Checking…';
+      try {
+        if (await checkAdmin(input.value)) { d.close(); await onOk(input.value); }
+        else { toast('That password isn’t right'); input.select(); }
+      } catch (err) {
+        toast(navigator.onLine ? (err.message || String(err)) : 'Connect to the internet to check the password');
+      } finally {
+        go1.disabled = false; go1.textContent = 'Unlock';
+      }
+    };
+    go1.addEventListener('click', tryIt);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); tryIt(); } });
   }
 
   function unlockLanguage() {
     if (isUnlocked()) { go('#/language'); return; }
-    const d = modal(`
-      <div class="chord-head"><div class="chord-big lockbig">${icon('lock')}</div>
-        <div><h2>Chord language</h2><p>Only the music director can change how chords are named.</p></div></div>
-      <div class="fields one"><label class="field">Password<input type="password" id="pw" autocomplete="current-password"></label></div>
-      <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form><button class="btn primary" id="pwGo">Unlock</button></div>`);
-    const input = $('#pw', d);
-    setTimeout(() => input.focus(), 50);
-    const tryIt = async () => {
-      if (!window.crypto || !crypto.subtle) { toast('Open the app from its https link to change this'); return; }
-      if ((await sha256hex(input.value)) === LANG_PW) {
-        try { sessionStorage.setItem('stobite-chords:lang-unlocked', '1'); } catch { /* ignore */ }
-        d.close();
-        go('#/language');
-      } else {
-        toast('That password isn’t right');
-        input.select();
-      }
-    };
-    $('#pwGo', d).addEventListener('click', tryIt);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); tryIt(); } });
+    askAdminPassword('Chord language', 'Only the music director can change how chords are named.', () => {
+      try { sessionStorage.setItem('stobite-chords:lang-unlocked', '1'); } catch { /* ignore */ }
+      go('#/language');
+    });
+  }
+
+  function claimLeader() {
+    askAdminPassword('Make me leader', 'For the music director: take the leader role for this team, so you can manage members and the code.', async (pw) => {
+      const { error } = await sync.client.rpc('claim_leader', { t: team.id, pw });
+      if (error) { toast('Could not make you leader: ' + error.message); return; }
+      team.role = 'leader';
+      writeJSON(TEAM_KEY, team);
+      await loadMembers();
+      viewSettings();
+      toast('You’re the leader now. Remove anyone who shouldn’t be in the team.');
+    });
   }
 
   function viewLanguage() {
