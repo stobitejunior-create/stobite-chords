@@ -27,7 +27,8 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 ## Features
 
 - Songs with key, tempo, time signature, tags and notes. You can search, filter by tag, sort, and mark favourites.
-- Chords as numbers, sol-fa (do de re ma mi fa fi so zi la ta ti) or letters, with a transpose picker.
+- Chords as numbers, sol-fa (do di re mo mi fa fi so zi la to ti by default, editable) or letters. Special names can have their own sol-fa name.
+- My transpose (Settings) moves every song up or down for you only; any song can override it.
 - Tap any chord to see its letter name and notes on a keyboard, in the key being played.
 - Three keys per song: the original, the key the band plays it in (set on the song, or per setlist), and your own transposition (just for you, on your device). Tap the key card to flip to the original; tap again to flip back.
 - Song bar order: Transpose, 1 2 3 / do re mi / C D E, text size, Full screen, then Keys / Bass / Lyrics. Your default view is set in Settings.

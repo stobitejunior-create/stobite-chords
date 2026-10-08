@@ -113,7 +113,10 @@
   const DEGREE_SEMI = { 1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11 };
   const SEMI_DEGREE = ['1', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
   // Chromatic sol-fa by semitone above "do": do de re ma mi fa fi so zi la ta ti
-  const SOLFA_SEMI = ['do', 'de', 're', 'ma', 'mi', 'fa', 'fi', 'so', 'zi', 'la', 'ta', 'ti'];
+  // The band's chromatic sol-fa, one name per semitone above "do" (editable in Settings → Chord language).
+  const DEFAULT_SOLFA = ['do', 'di', 're', 'mo', 'mi', 'fa', 'fi', 'so', 'zi', 'la', 'to', 'ti'];
+  const SOLFA_LABELS = ['1', '♯1 / ♭2', '2', '♯2 / ♭3', '3', '4', '♯4 / ♭5', '5', '♯5 / ♭6', '6', '♯6 / ♭7', '7'];
+  const solfaOf = (semi) => (language.solfa && language.solfa[semi]) || DEFAULT_SOLFA[semi];
   const FLAT_KEYS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm']);
   const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
   // The keys the band uses (minor keys from older songs still work).
@@ -199,6 +202,7 @@
       { name: '5#', root: '3', quality: 'maj' },
       { name: '6#', root: '2', quality: 'min#5' },
     ],
+    solfa: DEFAULT_SOLFA.slice(),
     updated: 0,
   };
   let language = readJSON(LANG_KEY, null) || JSON.parse(JSON.stringify(DEFAULT_LANGUAGE));
@@ -228,7 +232,7 @@
     const c = customFor(main);
     if (c) {
       const r = /^([b#]?)([1-7])$/.exec(normTok(c.root));
-      if (r) return { acc: r[1], post: false, deg: +r[2], qual: QCODE[c.quality] ?? '', shown: '', label: c.name, custom: true, bass };
+      if (r) return { acc: r[1], post: false, deg: +r[2], qual: QCODE[c.quality] ?? '', shown: '', label: c.name, solfa: (c.solfa || '').trim(), custom: true, bass };
     }
     const p = parseNum(main);
     if (!p) return null;
@@ -241,7 +245,7 @@
   const parseAny = resolveChord;
 
   function degName(acc, deg, post, mode, key) {
-    if (mode === 'solfa') return SOLFA_SEMI[numSemi(acc, deg)];
+    if (mode === 'solfa') return solfaOf(numSemi(acc, deg));
     if (mode === 'letters') { const k = keyInfo(key); if (k) return spellRoot(acc, deg, k).name; }
     return post ? deg + prettyAcc(acc) : prettyAcc(acc) + deg;
   }
@@ -259,6 +263,7 @@
     const q = (x) => (x ? `<span class="q">${esc(prettyQual(x))}</span>` : '');
     if (o.mode === 'letters') return esc(degName(r.acc, r.deg, false, 'letters', o.viewKey)) + q(r.qual) + bassHTML;
     if (r.custom) {
+      if (o.mode === 'solfa' && r.solfa) return esc(r.solfa) + bassHTML;
       if (o.mode === 'solfa') {
         const m = /^([b#]?)([1-7])(.*)$/.exec(normTok(r.label));
         if (m) return esc(degName(m[1], +m[2], false, 'solfa')) + q(m[3].replace(/#/g, '♯').replace(/^b$/, '♭')) + bassHTML;
@@ -790,7 +795,8 @@
   function keyFromSemi(semi, minor) { return KEY_BY_SEMI[((semi % 12) + 12) % 12] + (minor ? 'm' : ''); }
   /** My key: the band's key moved by my personal transposition for this song (kept on this device only). */
   function myKey(s) {
-    const band = songKeyInContext(s), k = keyInfo(band), shift = (prefs.shift || {})[s.id] || 0;
+    const own = prefs.shift || {};
+    const band = songKeyInContext(s), k = keyInfo(band), shift = s.id in own ? own[s.id] : (prefs.defaultShift || 0);
     return k && shift ? keyFromSemi(k.semi + shift, k.minor) : band;
   }
 
@@ -900,7 +906,7 @@
       const target = keyInfo(e.target.value);
       prefs.shift = prefs.shift || {};
       const d = target && bk ? (((target.semi - bk.semi) % 12) + 18) % 12 - 6 : 0; // nearest way up or down
-      if (d) prefs.shift[s.id] = d; else delete prefs.shift[s.id];
+      if (d === (prefs.defaultShift || 0)) delete prefs.shift[s.id]; else prefs.shift[s.id] = d; // same as my default: just follow it
       savePrefs();
       drawSong();
       toast(d ? `Transposed to ${prettyKey(e.target.value)} for you` : 'Back to the band’s key');
@@ -1536,6 +1542,7 @@ Jesus is the answer</pre>
   /* ================= settings ================= */
   function viewSettings() {
     document.title = 'Settings · Stobite Chords';
+    const ownShifts = Object.keys(prefs.shift || {}).length;
     const seg = (attr, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-${attr}="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div>`;
     main.innerHTML = `
       <header class="topbar"><div class="tb-title"><h1>Settings</h1><p class="sub">Make it yours</p></div></header>
@@ -1556,6 +1563,9 @@ Jesus is the answer</pre>
             ${seg('mode', prefs.mode, [['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']])}</div>
           <div class="srow"><div><b>My default view</b><small>What opens for you on this device. Bass shows only the bass note (1/5 → 5)</small></div>
             ${seg('part', prefs.part, [['keys', 'Keys'], ['bass', 'Bass'], ['lyrics', 'Lyrics']])}</div>
+          <div class="srow"><div><b>My transpose</b><small>Moves every song up or down, just for you. ${ownShifts ? `${ownShifts} song${ownShifts > 1 ? 's have' : ' has'} its own setting. <button class="link" id="clearShifts">Use this for all</button>` : 'A song you transpose yourself keeps its own setting.'}</small></div>
+            <select class="pill-select" id="defShift" aria-label="My transpose">${[-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5].map((d) =>
+              `<option value="${d}"${d === (prefs.defaultShift || 0) ? ' selected' : ''}>${d === 0 ? 'Off' : `${d < 0 ? 'Down' : 'Up'} ${Math.abs(d)} · G → ${prettyKey(keyFromSemi(7 + d))}`}</option>`).join('')}</select></div>
           <div class="srow"><div><b>Metronome click</b><small>Off = flashing light only</small></div>
             <button class="switch" role="switch" id="snd" aria-checked="${prefs.metroSound}" aria-label="Metronome click sound"></button></div>
         </section>
@@ -1575,6 +1585,13 @@ Jesus is the answer</pre>
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
+    $('#defShift').addEventListener('change', (e) => {
+      prefs.defaultShift = +e.target.value;
+      savePrefs();
+      toast(prefs.defaultShift ? `Songs now move ${prefs.defaultShift < 0 ? 'down' : 'up'} ${Math.abs(prefs.defaultShift)} for you` : 'My transpose is off');
+      viewSettings();
+    });
+    $('#clearShifts')?.addEventListener('click', () => { prefs.shift = {}; savePrefs(); toast('All songs follow your transpose'); viewSettings(); });
     $('#wipe')?.addEventListener('click', () => {
       if (!confirm('Erase ALL songs and setlists on this device? This cannot be undone. Share your library first if you want a backup.')) return;
       songs = []; setlists = []; prefs.favs = []; prefs.recent = [];
@@ -2223,6 +2240,11 @@ Jesus is the answer</pre>
   /* ---------- chord language: shared with the team, editable behind a password ---------- */
   const LANG_PW = '480cb8618eddac6cdc3f7d449e59f440ba0b08fa6402e8af7a659c638512e118'; // SHA-256, not the password itself
   const ROOTS = ['1', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
+  /** What a special name sounds like in sol-fa if nobody has named it: 1# -> do♯. */
+  function solfaGuess(name) {
+    const m = /^([b#]?)([1-7])(.*)$/.exec(normTok(name || ''));
+    return m ? solfaOf(numSemi(m[1], +m[2])) + m[3].replace(/#/g, '♯').replace(/^b$/, '♭') : '';
+  }
   const qualLabel = (id) => (QUALITIES.find((q) => q[0] === id) || [, id])[1];
 
   function languageSummary() {
@@ -2293,6 +2315,7 @@ Jesus is the answer</pre>
     if (!isUnlocked()) { go('#/settings'); return; }
     document.title = 'Chord language · Stobite Chords';
     const draft = JSON.parse(JSON.stringify(language));
+    if (!Array.isArray(draft.solfa) || draft.solfa.length !== 12) draft.solfa = DEFAULT_SOLFA.slice();
     state.langKey = state.langKey || 'F';
     const qualOpts = (cur) => QUALITIES.map(([id, label]) => `<option value="${id}"${id === cur ? ' selected' : ''}>${label}</option>`).join('');
     const rootOpts = (cur) => ROOTS.map((r) => `<option value="${r}"${normTok(cur) === r ? ' selected' : ''}>${prettyName(r)}</option>`).join('');
@@ -2321,6 +2344,12 @@ Jesus is the answer</pre>
               <span class="lang-ex" data-ex-plain="${d}">${example(String(d), draft.plain[d])}</span></div>`).join('')}
           </div>
         </section>
+        <section class="card"><h2>Sol-fa names</h2>
+          <p class="sub" style="margin-bottom:12px">What each note is called when you choose do re mi.</p>
+          <div class="solfa-grid">${draft.solfa.map((n, i) => `
+            <label class="solfa-cell"><small>${SOLFA_LABELS[i]}</small><input data-solfa="${i}" value="${esc(n)}" maxlength="6" aria-label="Sol-fa for ${SOLFA_LABELS[i]}"></label>`).join('')}
+          </div>
+        </section>
         <section class="card"><h2>Special names</h2>
           <p class="sub" style="margin-bottom:12px">A name the band says, and the chord it means. For example 1♯ = the 6 chord made major.</p>
           <div class="lang-list" id="customRows"></div>
@@ -2338,6 +2367,7 @@ Jesus is the answer</pre>
           <span class="eq">=</span>
           <select data-croot="${i}" aria-label="Built on">${rootOpts(c.root)}</select>
           <select data-cq="${i}" aria-label="Chord type">${qualOpts(c.quality)}</select>
+          <label class="lang-solfa"><span>Sol-fa</span><input data-csolfa="${i}" value="${esc(c.solfa || '')}" maxlength="10" placeholder="${esc(solfaGuess(c.name))}" aria-label="Sol-fa name"></label>
           <span class="lang-ex" data-ex-custom="${i}">${example(c.root, c.quality)}</span>
           <button class="btn ghost icon-only danger" data-cdel="${i}" title="Remove">${icon('x')}</button>
         </div>`).join('') || '<p class="sub">No special names yet.</p>';
@@ -2354,7 +2384,15 @@ Jesus is the answer</pre>
       else if (t.dataset.croot) { draft.custom[+t.dataset.croot].root = t.value; drawExamples(); }
       else if (t.dataset.cq) { draft.custom[+t.dataset.cq].quality = t.value; drawExamples(); }
     });
-    $('#langWrap').addEventListener('input', (e) => { if (e.target.dataset.cname) draft.custom[+e.target.dataset.cname].name = e.target.value.trim(); });
+    $('#langWrap').addEventListener('input', (e) => {
+      const t = e.target;
+      if (t.dataset.cname) {
+        draft.custom[+t.dataset.cname].name = t.value.trim();
+        const so = $(`[data-csolfa="${t.dataset.cname}"]`);
+        if (so) so.placeholder = solfaGuess(t.value.trim());
+      } else if (t.dataset.csolfa) draft.custom[+t.dataset.csolfa].solfa = t.value.trim();
+      else if (t.dataset.solfa) draft.solfa[+t.dataset.solfa] = t.value.trim();
+    });
     $('#customRows').addEventListener('click', (e) => {
       const b = e.target.closest('[data-cdel]');
       if (b) { draft.custom.splice(+b.dataset.cdel, 1); drawCustom(); }
@@ -2364,6 +2402,7 @@ Jesus is the answer</pre>
       if (!confirm('Put the chord language back to the defaults?')) return;
       Object.assign(draft, JSON.parse(JSON.stringify(DEFAULT_LANGUAGE)));
       $$('[data-plain]').forEach((el) => { el.value = draft.plain[el.dataset.plain]; });
+      $$('[data-solfa]').forEach((el) => { el.value = draft.solfa[+el.dataset.solfa]; });
       drawCustom(); drawExamples();
     });
     $('#langLock').addEventListener('click', () => { try { sessionStorage.removeItem('stobite-chords:lang-unlocked'); } catch { /* ignore */ } go('#/settings'); });
@@ -2373,6 +2412,7 @@ Jesus is the answer</pre>
       const bad = draft.custom.find((c) => !/^[b#]?[1-7]/.test(normTok(c.name)) || /^[1-7]$/.test(normTok(c.name)) || c.name.includes('/'));
       if (bad) { toast(`“${bad.name}” needs to start with a number and add something, like 2# or 5m`); return; }
       if (new Set(names).size !== names.length) { toast('Two special names are the same'); return; }
+      draft.solfa = draft.solfa.map((n, i) => n || DEFAULT_SOLFA[i]);
       language = { ...draft, updated: Date.now() };
       writeJSON(LANG_KEY, language);
       pushLanguage();

@@ -650,3 +650,18 @@ html, body, button, a, select, .ch { touch-action: manipulation; }
 .stage-dock .dt.title small { display: inline; font-size: 12px; opacity: .6; letter-spacing: 0; text-transform: none; margin-left: 4px; }
 .stage-dock .size-pair { display: inline-flex; gap: 8px; padding: 0 4px; }
 .stage-dock .db { width: 46px; height: 46px; font-size: 17px; }
+
+/* ============ sol-fa names ============ */
+.solfa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+.solfa-cell { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 12px; background: var(--surface-2); }
+.solfa-cell small { font-size: 11px; font-weight: 750; color: var(--muted); white-space: nowrap; }
+.solfa-cell input, .lang-solfa input {
+  width: 100%; font: 800 16px/1 inherit; padding: 8px 6px; text-align: center; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+}
+.solfa-cell input:focus, .lang-solfa input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.lang-solfa { display: inline-flex; align-items: center; gap: 6px; }
+.lang-solfa span { font-size: 12px; font-weight: 750; color: var(--muted); }
+.lang-solfa input { width: 74px; color: var(--primary); }
+.lang-solfa input::placeholder { color: var(--faint); font-weight: 600; }
+select#defShift { flex: none; }
