@@ -664,4 +664,4 @@ html, body, button, a, select, .ch { touch-action: manipulation; }
 .lang-solfa span { font-size: 12px; font-weight: 750; color: var(--muted); }
 .lang-solfa input { width: 74px; color: var(--primary); }
 .lang-solfa input::placeholder { color: var(--faint); font-weight: 600; }
-select#defShift { flex: none; }
+select#myKeySel { flex: none; }

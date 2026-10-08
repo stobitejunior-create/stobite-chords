@@ -89,6 +89,7 @@
     { mode: 'numbers', part: 'keys', size: 20, theme: 'auto', favs: [], recent: [], metroSound: true, sort: 'title', scrollSpeed: 3 },
     readJSON(PREF_KEY, {}),
   );
+  delete prefs.shift; delete prefs.defaultShift; // replaced by myKey / songKeys
   writeJSON(libKey(), songs);
 
   function saveLibrary() { const ok = writeJSON(libKey(), songs); scheduleSync(); return ok; }
@@ -794,11 +795,16 @@
   const KEY_BY_SEMI = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
   function keyFromSemi(semi, minor) { return KEY_BY_SEMI[((semi % 12) + 12) % 12] + (minor ? 'm' : ''); }
   /** My key: the band's key moved by my personal transposition for this song (kept on this device only). */
+  /** My key for a song: the key I picked for this song, else my usual key (Settings), else the band's key. Device only. */
   function myKey(s) {
-    const own = prefs.shift || {};
-    const band = songKeyInContext(s), k = keyInfo(band), shift = s.id in own ? own[s.id] : (prefs.defaultShift || 0);
-    return k && shift ? keyFromSemi(k.semi + shift, k.minor) : band;
+    const band = songKeyInContext(s), k = keyInfo(band);
+    if (!k) return band;
+    const pick = (prefs.songKeys || {})[s.id] || prefs.myKey;
+    const p = keyInfo(pick);
+    return p ? keyFromSemi(p.semi, k.minor) : band;
   }
+  /** What a song follows when it has no key of its own: my usual key, or the band's key. */
+  const defaultKeyFor = (s) => { const k = keyInfo(songKeyInContext(s)), p = keyInfo(prefs.myKey); return p && k ? keyFromSemi(p.semi, k.minor) : songKeyInContext(s); };
 
   function pushRecent(id) {
     prefs.recent = [id, ...prefs.recent.filter((x) => x !== id)].slice(0, 10);
@@ -903,13 +909,13 @@
     $('#used').innerHTML = used.length ? `<span>${state.part === 'bass' ? 'Bass notes' : 'Chords'}</span>${used.join('')}` : '';
     $('#chart').innerHTML = renderChart(s.chart, o) || '<p class="sub">This song has no lyrics yet. Tap Edit to add them.</p>';
     $('#tp')?.addEventListener('change', (e) => {
-      const target = keyInfo(e.target.value);
-      prefs.shift = prefs.shift || {};
-      const d = target && bk ? (((target.semi - bk.semi) % 12) + 18) % 12 - 6 : 0; // nearest way up or down
-      if (d === (prefs.defaultShift || 0)) delete prefs.shift[s.id]; else prefs.shift[s.id] = d; // same as my default: just follow it
+      const v = e.target.value;
+      prefs.songKeys = prefs.songKeys || {};
+      if (v === defaultKeyFor(s)) delete prefs.songKeys[s.id]; // same as usual: just follow it
+      else prefs.songKeys[s.id] = v;
       savePrefs();
       drawSong();
-      toast(d ? `Transposed to ${prettyKey(e.target.value)} for you` : 'Back to the band’s key');
+      toast(v === band ? 'Back to the band’s key' : `Showing ${prettyKey(v)} for you`);
     });
   }
 
@@ -1542,7 +1548,7 @@ Jesus is the answer</pre>
   /* ================= settings ================= */
   function viewSettings() {
     document.title = 'Settings · Stobite Chords';
-    const ownShifts = Object.keys(prefs.shift || {}).length;
+    const ownKeys = Object.keys(prefs.songKeys || {}).filter(byId).length;
     const seg = (attr, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-${attr}="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div>`;
     main.innerHTML = `
       <header class="topbar"><div class="tb-title"><h1>Settings</h1><p class="sub">Make it yours</p></div></header>
@@ -1563,9 +1569,9 @@ Jesus is the answer</pre>
             ${seg('mode', prefs.mode, [['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']])}</div>
           <div class="srow"><div><b>My default view</b><small>What opens for you on this device. Bass shows only the bass note (1/5 → 5)</small></div>
             ${seg('part', prefs.part, [['keys', 'Keys'], ['bass', 'Bass'], ['lyrics', 'Lyrics']])}</div>
-          <div class="srow"><div><b>My transpose</b><small>Moves every song up or down, just for you. ${ownShifts ? `${ownShifts} song${ownShifts > 1 ? 's have' : ' has'} its own setting. <button class="link" id="clearShifts">Use this for all</button>` : 'A song you transpose yourself keeps its own setting.'}</small></div>
-            <select class="pill-select" id="defShift" aria-label="My transpose">${[-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5].map((d) =>
-              `<option value="${d}"${d === (prefs.defaultShift || 0) ? ' selected' : ''}>${d === 0 ? 'Off' : `${d < 0 ? 'Down' : 'Up'} ${Math.abs(d)} · G → ${prettyKey(keyFromSemi(7 + d))}`}</option>`).join('')}</select></div>
+          <div class="srow"><div><b>My key</b><small>Every song shows in this key for you, so tapping a chord shows it in this key. Only on this device. ${ownKeys ? `${ownKeys} song${ownKeys > 1 ? 's have' : ' has'} a key of its own. <button class="link" id="clearSongKeys">Use my key for all</button>` : 'A song you change yourself keeps its own key.'}</small></div>
+            <select class="pill-select" id="myKeySel" aria-label="My key"><option value="">Band’s key</option>${KEYS.map((k) =>
+              `<option value="${k}"${k === prefs.myKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></div>
           <div class="srow"><div><b>Metronome click</b><small>Off = flashing light only</small></div>
             <button class="switch" role="switch" id="snd" aria-checked="${prefs.metroSound}" aria-label="Metronome click sound"></button></div>
         </section>
@@ -1585,13 +1591,13 @@ Jesus is the answer</pre>
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
-    $('#defShift').addEventListener('change', (e) => {
-      prefs.defaultShift = +e.target.value;
+    $('#myKeySel').addEventListener('change', (e) => {
+      prefs.myKey = e.target.value;
       savePrefs();
-      toast(prefs.defaultShift ? `Songs now move ${prefs.defaultShift < 0 ? 'down' : 'up'} ${Math.abs(prefs.defaultShift)} for you` : 'My transpose is off');
+      toast(prefs.myKey ? `Every song now shows in ${prettyKey(prefs.myKey)} for you` : 'Songs show in the band’s key');
       viewSettings();
     });
-    $('#clearShifts')?.addEventListener('click', () => { prefs.shift = {}; savePrefs(); toast('All songs follow your transpose'); viewSettings(); });
+    $('#clearSongKeys')?.addEventListener('click', () => { prefs.songKeys = {}; savePrefs(); toast('All songs use your key'); viewSettings(); });
     $('#wipe')?.addEventListener('click', () => {
       if (!confirm('Erase ALL songs and setlists on this device? This cannot be undone. Share your library first if you want a backup.')) return;
       songs = []; setlists = []; prefs.favs = []; prefs.recent = [];
