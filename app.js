@@ -456,7 +456,8 @@
   function sectionKind(name) {
     const n = name.toLowerCase();
     if (/pre-?chorus/.test(n)) return 'pre';
-    if (/chorus|refrain|hook/.test(n)) return 'chorus';
+    if (/refrain/.test(n)) return 'refrain';
+    if (/chorus|hook/.test(n)) return 'chorus';
     if (/bridge/.test(n)) return 'bridge';
     if (/verse/.test(n)) return 'verse';
     return 'other';
