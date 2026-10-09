@@ -1423,7 +1423,7 @@
               ${[...new Set(chordButtons())].map((c) => `<button type="button" data-ins="[${esc(c)}]">${esc(prettyName(c))}</button>`).join('')}
               <button type="button" data-ins="[]" data-back="1">[ ]</button>
               ${['♭', '♯', 'm', '7', '+', '°', '/'].map((x) => `<button type="button" class="symb" data-ins="${x}" title="Type ${x}">${x}</button>`).join('')}
-              ${['Verse', 'Chorus', 'Bridge'].map((x) => `<button type="button" class="secb" data-ins="\n${x}\n">${x}</button>`).join('')}
+              ${['Verse', 'Chorus', 'Bridge'].map((x) => `<button type="button" class="secb" data-sec="${x}">${x}</button>`).join('')}
             </div>
             <textarea id="chartInput" spellcheck="false" autocapitalize="sentences" placeholder="Verse 1&#10;[1]Jesus is the [7]answer&#10;&#10;— or put the chords on the line above —&#10;&#10;1                   7&#10;Jesus is the answer">${esc(s.chart)}</textarea>
           </div>
@@ -1515,8 +1515,14 @@ Jesus is the answer</pre>
     $('#cbar').addEventListener('click', (e) => {
       const b = e.target.closest('button');
       if (!b) return;
-      const start = ta.selectionStart;
-      ta.setRangeText(b.dataset.ins, start, ta.selectionEnd, 'end');
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      let ins = b.dataset.ins;
+      if (b.dataset.sec) {
+        // A heading needs its own line, but no blank lines around it.
+        const before = ta.value[start - 1], after = ta.value[end];
+        ins = (before && before !== '\n' ? '\n' : '') + b.dataset.sec + (after && after !== '\n' ? '\n' : '');
+      }
+      ta.setRangeText(ins, start, end, 'end');
       if (b.dataset.back) ta.setSelectionRange(start + 1, start + 1);
       ta.focus();
       draw();
