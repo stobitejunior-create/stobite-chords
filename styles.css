@@ -271,7 +271,7 @@ body.bass .used b { color: var(--bass); background: color-mix(in srgb, var(--bas
 .blk.k-chorus { background: linear-gradient(90deg, color-mix(in srgb, var(--chorus) 12%, transparent), color-mix(in srgb, var(--chorus) 3%, transparent) 70%, transparent); }
 .blk-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--k); background: color-mix(in srgb, var(--k) 13%, transparent); padding: 4px 11px; border-radius: 999px; margin: 0 0 .55em; }
 .chart .ln { display: flex; flex-wrap: wrap; align-items: flex-end; margin: 0 0 .28em; }
-.chart .plain { white-space: pre-wrap; margin: 0 0 .28em; line-height: 1.4; }
+.chart .plain { white-space: pre-wrap; margin: 0 0 .28em; line-height: 1.38; font-weight: 500; }
 .chart .sg { display: inline-flex; flex-direction: column; white-space: pre; }
 .chart .c { color: var(--chord); font-weight: 800; font-size: .8em; line-height: 1.3; min-height: 1.3em; padding-right: .45em; }
 .chart .c .q { font-size: .78em; font-weight: 700; }
