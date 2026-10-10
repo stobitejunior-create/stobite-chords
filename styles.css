@@ -675,3 +675,4 @@ select#myKeySel { flex: none; }
 /* section labels follow the text size, so small text really fits more on screen */
 .blk-label { font-size: max(8px, .6em); padding: .3em .9em; }
 .blk:not(.k-none) { padding-top: .45em; padding-bottom: .45em; }
+.about .ver { font-weight: 700; color: var(--muted); }

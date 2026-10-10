@@ -49,6 +49,8 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
+  const APP_VERSION = 20; // shown in Settings; keep in step with CACHE in sw.js
+
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
   const SET_KEY = 'stobite-chords:setlists';
@@ -1597,7 +1599,7 @@ Jesus is the answer</pre>
           ${team ? '' : `<div class="srow"><div><b>Erase everything</b><small>Removes all songs and setlists from this device</small></div>
             <button class="btn danger" id="wipe">${icon('trash')}Erase</button></div>`}
         </section>
-        <p class="about"><b>Stobite Chords</b> · ${team ? `Songs are shared with ${esc(team.name)} and kept on this device for offline use.` : 'Your songs stay on this device.'}<br>Keyboard: Space scroll · ←/→ setlist · M metronome · F stage · +/− size</p>
+        <p class="about"><b>Stobite Chords</b> <span class="ver">version ${APP_VERSION}</span> · ${team ? `Songs are shared with ${esc(team.name)} and kept on this device for offline use.` : 'Your songs stay on this device.'}<br>Keyboard: Space scroll · ←/→ setlist · M metronome · F stage · +/− size</p>
       </div>`;
     $('#snd').addEventListener('click', () => { prefs.metroSound = !prefs.metroSound; savePrefs(); viewSettings(); });
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
@@ -2528,6 +2530,16 @@ Jesus is the answer</pre>
     lastTap = now;
   }, { passive: false });
   document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+  // Safety net (iPad Safari can still zoom): if the page ever ends up zoomed, snap it straight back.
+  const vpMeta = document.querySelector('meta[name="viewport"]');
+  const vpBase = vpMeta && vpMeta.content;
+  let unzooming = false;
+  window.visualViewport?.addEventListener('resize', () => {
+    if (!vpMeta || unzooming || window.visualViewport.scale <= 1.01) return;
+    unzooming = true;
+    vpMeta.content = vpBase.replace('initial-scale=1', 'initial-scale=1.0001'); // changing it makes Safari re-apply the scale
+    requestAnimationFrame(() => setTimeout(() => { vpMeta.content = vpBase; unzooming = false; }, 60));
+  });
 
   window.addEventListener('hashchange', route);
   route();
