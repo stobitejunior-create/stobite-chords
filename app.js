@@ -1101,8 +1101,12 @@
     }
   });
 
+  // Text sizes from very small (whole song on one screen) to very big (reading from a distance).
+  const SIZES = [10, 11, 12, 14, 16, 18, 20, 22, 24, 27, 30, 34, 38, 43, 48, 54, 60, 68, 76];
   function changeSize(d) {
-    prefs.size = Math.min(40, Math.max(12, prefs.size + d));
+    const i = SIZES.findIndex((x) => x >= prefs.size);
+    const at = i < 0 ? SIZES.length - 1 : i;
+    prefs.size = SIZES[Math.min(SIZES.length - 1, Math.max(0, at + (d > 0 ? 1 : -1)))];
     savePrefs();
     document.documentElement.style.setProperty('--lyric', prefs.size + 'px');
   }
@@ -2514,6 +2518,16 @@ Jesus is the answer</pre>
   // No accidental zooming while playing (iOS ignores the viewport setting, so block the gestures too).
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
   document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  // Double-tap zoom: iPhones still zoom on a quick second tap on text, so cancel that second tap
+  // unless it lands on a button or field (so tapping A+ twice quickly still works).
+  let lastTap = 0;
+  document.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    const onControl = e.target.closest && e.target.closest('button, a, input, textarea, select, label, .ch, .db');
+    if (now - lastTap < 350 && !onControl && e.touches.length === 0) e.preventDefault();
+    lastTap = now;
+  }, { passive: false });
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 
   window.addEventListener('hashchange', route);
   route();

@@ -633,7 +633,7 @@ select.si-key { padding: 6px 28px 6px 10px; background-position: right 8px cente
 .key-chip { padding: 0 14px; }
 
 /* no double-tap zoom (taps still register instantly) */
-html, body, button, a, select, .ch { touch-action: manipulation; }
+*, *::before, *::after { touch-action: manipulation; }
 
 /* ============ transpose picker ============ */
 .tp-wrap { position: relative; display: inline-flex; align-items: center; flex: none; }
