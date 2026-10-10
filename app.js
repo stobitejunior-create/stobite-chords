@@ -888,18 +888,19 @@
       const tags = [kk === band ? 'band' : '', kk === s.key && kk !== band ? 'original' : ''].filter(Boolean).join(', ');
       return `<option value="${esc(kk)}"${kk === mine ? ' selected' : ''}>${esc(prettyKey(kk))}${tags ? ` (${tags})` : ''}</option>`;
     }).join('') : '';
+    // Order chosen by the band: full screen, text size, transpose, keys/bass/lyrics, chord names.
     $('#controls').innerHTML = `
-      ${bk ? `<label class="tp-wrap${mine !== band ? ' moved' : ''}" title="Transpose for me (only on this device)">${icon('transpose')}<select class="pill-select tp" id="tp" aria-label="Transpose for me">${keyOpts}</select></label>` : ''}
-      ${lyrics ? '' : `<div class="seg" role="group" aria-label="Chord names">
-        ${[['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']].map(([v, l]) =>
-          `<button data-mode="${v}" aria-pressed="${prefs.mode === v}">${l}</button>`).join('')}
-      </div>`}
-      <div class="seg" role="group" aria-label="Text size"><button data-size="-2" aria-label="Smaller text">A−</button><button data-size="2" aria-label="Bigger text">A+</button></div>
       <button class="tool" data-act="stage" title="Full screen (F)">${icon('stage')}<span class="hide-sm">Full screen</span></button>
+      <div class="seg" role="group" aria-label="Text size"><button data-size="-2" aria-label="Smaller text">A−</button><button data-size="2" aria-label="Bigger text">A+</button></div>
+      ${bk ? `<label class="tp-wrap${mine !== band ? ' moved' : ''}" title="Transpose for me (only on this device)">${icon('transpose')}<select class="pill-select tp" id="tp" aria-label="Transpose for me">${keyOpts}</select></label>` : ''}
       <div class="seg part" role="group" aria-label="Show chords for">
         ${[['keys', 'piano', 'Keys'], ['bass', 'guitar', 'Bass'], ['lyrics', 'mic', 'Lyrics']].map(([v, ic, l]) =>
           `<button data-part="${v}" aria-pressed="${state.part === v}">${icon(ic)}${l}</button>`).join('')}
-      </div>`;
+      </div>
+      ${lyrics ? '' : `<div class="seg" role="group" aria-label="Chord names">
+        ${[['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']].map(([v, l]) =>
+          `<button data-mode="${v}" aria-pressed="${prefs.mode === v}">${l}</button>`).join('')}
+      </div>`}`;
     const mk = $('#mineKey');
     if (mk) mk.textContent = mine !== band ? `You: ${prettyKey(mine)}` : '';
     document.body.classList.toggle('bass', state.part === 'bass');

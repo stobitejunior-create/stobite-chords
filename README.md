@@ -31,7 +31,7 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 - My key (Settings): pick a key, e.g. F, and every song shows in it for you only, so tapping a chord shows it in F. Any song can have its own key.
 - Tap any chord to see its letter name and notes on a keyboard, in the key being played.
 - Three keys per song: the original, the key the band plays it in (set on the song, or per setlist), and your own transposition (just for you, on your device). Tap the key card to flip to the original; tap again to flip back.
-- Song bar order: Transpose, 1 2 3 / do re mi / C D E, text size, Full screen, then Keys / Bass / Lyrics. Your default view is set in Settings.
+- Song bar order: Full screen, text size, Transpose, Keys / Bass / Lyrics, then 1 2 3 / do re mi / C D E. Your default view is set in Settings.
 - Delete a song from its page, or tap Select in the library to delete several at once (with Undo).
 - Keys, Bass (bass note only) or Lyrics-only view.
 - Setlists with a date, notes and a key per song. Swipe or use the ←/→ keys to move between songs.
