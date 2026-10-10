@@ -676,3 +676,8 @@ select#myKeySel { flex: none; }
 .blk-label { font-size: max(8px, .6em); padding: .3em .9em; }
 .blk:not(.k-none) { padding-top: .45em; padding-bottom: .45em; }
 .about .ver { font-weight: 700; color: var(--muted); }
+
+/* auto-scroll speed slider */
+.speed { display: inline-flex; align-items: center; gap: 12px; flex: none; }
+.speed input[type="range"] { width: 170px; accent-color: var(--primary); }
+.speed b { min-width: 22px; text-align: right; font-size: 17px; }

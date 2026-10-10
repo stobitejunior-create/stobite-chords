@@ -35,7 +35,7 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 - Delete a song from its page, or tap Select in the library to delete several at once (with Undo).
 - Keys, Bass (bass note only) or Lyrics-only view.
 - Setlists with a date, notes and a key per song. Swipe or use the ←/→ keys to move between songs.
-- Stage mode (full screen, big text), autoscroll, and a metronome with a click or a flash only.
+- Full screen with a play button for auto-scroll (speed set in Settings, adjustable while scrolling), and a metronome with a click or a flash only.
 - Tap tempo, colour-coded sections, a summary of the chords used, and print.
 - Light and dark themes. The screen stays on while a song is open.
 - Share a song, a setlist or the whole library as a file, as text or as a link.

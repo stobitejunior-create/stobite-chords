@@ -49,7 +49,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 20; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 21; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -942,7 +942,8 @@
 
   /* ---------- autoscroll ---------- */
   const scroller = { on: false, raf: 0, last: 0, acc: 0 };
-  const speedPx = () => 6 + prefs.scrollSpeed * 6;
+  const SCROLL_MAX = 15;
+  const speedPx = () => 3 + Math.min(SCROLL_MAX, prefs.scrollSpeed) * 4; // pixels per second
   function scrollStep(t) {
     const dt = Math.min(0.1, (t - scroller.last) / 1000);
     scroller.last = t;
@@ -1058,12 +1059,14 @@
       const set = state.set, i = state.setIdx;
       g.push(`<div class="dg stage-dock">
         <span class="dt title">${esc(state.song.title)}${set ? ` <small>${i + 1} / ${set.items.length}</small>` : ''}</span>
+        <button class="db go" data-d="stage-scroll" title="${scroller.on ? 'Pause auto-scroll' : 'Start auto-scroll'}">${icon(scroller.on ? 'pause' : 'play', 'fill')}</button>
         <span class="size-pair"><button class="db" data-d="size-" title="Smaller text">A−</button><button class="db" data-d="size+" title="Bigger text">A+</button></span>
         <button class="db" data-d="stage-off" title="Leave full screen">${icon('x')}</button></div>`);
     }
     if (inSong && state.scrollMode) {
-      g.push(`<div class="dg">
-        <button class="db go" data-d="scroll-toggle" title="${scroller.on ? 'Pause' : 'Play'}">${icon(scroller.on ? 'pause' : 'play', 'fill')}</button>
+      const inStage = document.body.classList.contains('stage');
+      g.unshift(`<div class="dg">
+        ${inStage ? '' : `<button class="db go" data-d="scroll-toggle" title="${scroller.on ? 'Pause' : 'Play'}">${icon(scroller.on ? 'pause' : 'play', 'fill')}</button>`}
         <button class="db" data-d="slower" title="Slower">−</button>
         <span class="dt"><small>Speed</small>${prefs.scrollSpeed}</span>
         <button class="db" data-d="faster" title="Faster">+</button>
@@ -1091,8 +1094,9 @@
       case 'stage-off': exitStage(); break;
       case 'size-': case 'size+': changeSize(b.dataset.d === 'size+' ? 2 : -2); break;
       case 'scroll-toggle': playScroll(!scroller.on); break;
+      case 'stage-scroll': if (!state.scrollMode) startScroll(); else playScroll(!scroller.on); renderDock(); break;
       case 'slower': case 'faster':
-        prefs.scrollSpeed = Math.min(10, Math.max(1, prefs.scrollSpeed + (b.dataset.d === 'faster' ? 1 : -1)));
+        prefs.scrollSpeed = Math.min(SCROLL_MAX, Math.max(1, prefs.scrollSpeed + (b.dataset.d === 'faster' ? 1 : -1)));
         savePrefs(); renderDock(); break;
       case 'scroll-off': stopScroll(); break;
       case 'bpm-': case 'bpm+':
@@ -1581,6 +1585,8 @@ Jesus is the answer</pre>
         <section class="card"><h2>Charts</h2>
           <div class="srow"><div><b>Chord names</b><small>How chords are written</small></div>
             ${seg('mode', prefs.mode, [['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']])}</div>
+          <div class="srow"><div><b>Auto-scroll speed</b><small>Used by the play button in full screen (and the space bar). 1 is very slow.</small></div>
+            <label class="speed"><input type="range" id="scrollSpeed" min="1" max="${SCROLL_MAX}" step="1" value="${Math.min(SCROLL_MAX, prefs.scrollSpeed)}" aria-label="Auto-scroll speed"><b id="scrollSpeedVal">${Math.min(SCROLL_MAX, prefs.scrollSpeed)}</b></label></div>
           <div class="srow"><div><b>My default view</b><small>What opens for you on this device. Bass shows only the bass note (1/5 → 5)</small></div>
             ${seg('part', prefs.part, [['keys', 'Keys'], ['bass', 'Bass'], ['lyrics', 'Lyrics']])}</div>
           <div class="srow"><div><b>My key</b><small>Every song shows in this key for you, so tapping a chord shows it in this key. Only on this device. ${ownKeys ? `${ownKeys} song${ownKeys > 1 ? 's have' : ' has'} a key of its own. <button class="link" id="clearSongKeys">Use my key for all</button>` : 'A song you change yourself keeps its own key.'}</small></div>
@@ -1605,6 +1611,8 @@ Jesus is the answer</pre>
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
+    $('#scrollSpeed').addEventListener('input', (e) => { prefs.scrollSpeed = +e.target.value; $('#scrollSpeedVal').textContent = e.target.value; });
+    $('#scrollSpeed').addEventListener('change', savePrefs);
     $('#myKeySel').addEventListener('change', (e) => {
       prefs.myKey = e.target.value;
       savePrefs();
