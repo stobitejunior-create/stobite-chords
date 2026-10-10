@@ -1102,7 +1102,7 @@
   });
 
   // Text sizes from very small (whole song on one screen) to very big (reading from a distance).
-  const SIZES = [10, 11, 12, 14, 16, 18, 20, 22, 24, 27, 30, 34, 38, 43, 48, 54, 60, 68, 76];
+  const SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 27, 30, 34, 38, 43, 48, 54, 60, 68, 76];
   function changeSize(d) {
     const i = SIZES.findIndex((x) => x >= prefs.size);
     const at = i < 0 ? SIZES.length - 1 : i;
