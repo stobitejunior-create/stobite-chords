@@ -681,3 +681,46 @@ select#myKeySel { flex: none; }
 .speed { display: inline-flex; align-items: center; gap: 12px; flex: none; }
 .speed input[type="range"] { width: 170px; accent-color: var(--primary); }
 .speed b { min-width: 22px; text-align: right; font-size: 17px; }
+
+/* ============ artist portraits ============ */
+.av { position: relative; overflow: hidden; }
+.av .pimg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.av.pic { box-shadow: 0 4px 14px rgb(0 0 0 / .22); }
+.av.pic .kl { position: absolute; right: 3px; bottom: 3px; z-index: 1; font-size: 11px; line-height: 1; padding: 3px 5px; border-radius: 7px; background: rgb(12 12 13 / .74); color: #fff; font-weight: 800; }
+.hero-av { position: absolute; right: 18px; top: 18px; width: 84px; height: 84px; border-radius: 22px; font-size: 26px; z-index: 1; border: 2px solid rgb(255 255 255 / .55); }
+.hero-av:not(.pic) { display: none; }
+.hero.has-pic h1, .hero.has-pic .hero-artist { padding-right: 92px; }
+@media (max-width: 480px) { .hero-av { width: 64px; height: 64px; border-radius: 18px; right: 14px; top: 14px; } .hero.has-pic h1, .hero.has-pic .hero-artist { padding-right: 72px; } }
+.listen-b { display: flex; align-items: center; gap: 6px; }
+.listen-b .ic { width: 20px; height: 20px; }
+
+/* editor: picture box, YouTube, scan and lyric tools */
+.pbox { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px; border-radius: 14px; background: var(--surface-2); }
+.pthumb { width: 52px; height: 52px; border-radius: 14px; overflow: hidden; background: var(--surface); display: grid; place-items: center; color: var(--faint); flex: none; }
+.pthumb img { width: 100%; height: 100%; object-fit: cover; }
+.ptext { flex: 1; min-width: 150px; display: flex; flex-direction: column; }
+.ptext b { color: var(--text); font-size: 14px; }
+.ptext small { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.pbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.get-lyrics { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.offer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-radius: 14px; margin-bottom: 10px; background: var(--primary-soft); color: var(--text); font-size: 14.5px; }
+.offer[hidden] { display: none; }
+.offer > span:first-child { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.offer .ic { color: var(--primary); flex: none; }
+.offer-btns { display: flex; gap: 6px; }
+button.result { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 12px; border: 0; border-radius: 12px; background: none; cursor: pointer; }
+button.result:hover { background: var(--surface-2); }
+button.result b { font-size: 15.5px; }
+button.result span { color: var(--muted); font-size: 13.5px; }
+button.result small { color: var(--faint); font-size: 12.5px; }
+dialog.modal p.fine { font-size: 12.5px; color: var(--faint); margin: 0 0 12px; }
+
+/* video player and "please wait" boxes */
+dialog.video-modal { width: min(760px, calc(100vw - 20px)); }
+.yt { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background: #000; }
+.yt iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.busy { text-align: center; padding: 10px 0 4px; }
+.spin { width: 38px; height: 38px; margin: 0 auto 14px; border-radius: 50%; border: 4px solid var(--primary-soft); border-top-color: var(--primary); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+dialog.busy-modal { width: min(340px, calc(100vw - 24px)); }
+dialog.busy-modal p { margin: 0; }

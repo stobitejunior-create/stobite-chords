@@ -29,6 +29,9 @@
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     transpose: '<path d="M7 4v16M7 4 3 8M7 4l4 4M17 20V4M17 20l-4-4M17 20l4-4"/>',
+    camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+    globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
     lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
@@ -49,7 +52,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 21; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 22; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -88,7 +91,7 @@
   }
   loadSpace();
   const prefs = Object.assign(
-    { mode: 'numbers', part: 'keys', size: 20, theme: 'auto', favs: [], recent: [], metroSound: true, sort: 'title', scrollSpeed: 3 },
+    { mode: 'numbers', part: 'keys', thumbs: 'key', size: 20, theme: 'auto', favs: [], recent: [], metroSound: true, sort: 'title', scrollSpeed: 3 },
     readJSON(PREF_KEY, {}),
   );
   delete prefs.shift; delete prefs.defaultShift; // replaced by myKey / songKeys
@@ -659,7 +662,7 @@
   function songCard(s, picked) {
     return `<a class="song-card${picked ? ' picked' : ''}" href="#/s/${enc(s.id)}" data-id="${esc(s.id)}" style="--h:${hueOf(s.title)}">
       <span class="pick">${icon('check')}</span>
-      <span class="av">${esc(prettyKey(s.key) || '—')}</span>
+      ${avHTML(s)}
       <span class="sc-body">
         <span class="sc-title">${esc(s.title)}</span>
         <span class="sc-artist">${esc(s.artist || 'Unknown artist')}</span>
@@ -742,6 +745,7 @@
       ? emptyState('star', 'No favorites yet', 'Tap the star on any song to keep it here for quick access.', '<a class="btn soft" href="#/">Browse songs</a>')
       : emptyState('search', 'No songs found', songs.length ? 'Try a different search or filter.' : 'Add your first song to get started.', '<a class="btn primary" href="#/new">' + icon('plus') + 'New song</a>'));
     drawSelectBar();
+    loadPortraits();
   }
 
   function drawSelectBar() {
@@ -849,6 +853,7 @@
       </header>
       <div class="content narrow">
         <section class="hero" style="--h:${hueOf(s.title)}">
+          ${prefs.thumbs === 'portrait' && s.artist ? avHTML(s, 'hero-av') : ''}
           <div>
             ${set ? `<a class="eyebrow" href="#/set/${enc(set.id)}">${icon('list')}${esc(set.name)} · ${idx + 1} of ${set.items.length}</a>`
               : s.tags && s.tags.length ? `<span class="eyebrow">${esc(s.tags.join(' · '))}</span>` : ''}
@@ -861,6 +866,7 @@
               <span class="face back"><span>Original</span><b>${esc(prettyKey(s.key) || '—')}</b></span></span></button>
             <button class="stat stat-btn" data-act="metro" title="Start metronome"><span>Tempo</span><b>${esc(s.tempo || '—')}<small> bpm</small></b><i class="beat" id="heroBeat"></i></button>
             <div class="stat"><span>Time</span><b>${esc(s.time || '—')}</b></div>
+            <button class="stat stat-btn" data-act="listen" title="${s.video ? 'Play the YouTube video' : 'Search YouTube for this song'}"><span>Listen</span><b class="listen-b">${icon('play', 'fill')}<small>${s.video ? 'YouTube' : 'Find'}</small></b></button>
           </div>
         </section>
         ${s.info ? `<div class="info-card">${icon('info')}<div>${esc(s.info)}</div></div>` : ''}
@@ -876,6 +882,8 @@
         </nav>` : ''}
       </div>`;
     drawSong();
+    $('.hero-av.pic')?.closest('.hero').classList.add('has-pic'); // keep the title clear of a saved portrait
+    loadPortraits();
     requestWake();
     bindSwipe($('#chartCard'));
   }
@@ -1141,7 +1149,7 @@
       else { const k = $('#f').key.value; openChord(ch.dataset.ch, k, k); }
       return;
     }
-    const b = e.target.closest('[data-act],[data-mode],[data-part],[data-size],[data-theme-set]');
+    const b = e.target.closest('[data-act],[data-mode],[data-part],[data-size],[data-theme-set],[data-thumbs]');
     if (!b) return;
     const s = state.song;
     const inSong = state.route && state.route.name === 'song';
@@ -1152,6 +1160,7 @@
       return;
     }
     if (b.dataset.size) { changeSize(+b.dataset.size); if (!inSong) viewSettings(); return; }
+    if (b.dataset.thumbs) { prefs.thumbs = b.dataset.thumbs; savePrefs(); viewSettings(); return; }
     if (b.dataset.themeSet) { prefs.theme = b.dataset.themeSet; savePrefs(); applyTheme(); viewSettings(); return; }
     switch (b.dataset.act) {
       case 'import': openImport(); break;
@@ -1176,6 +1185,7 @@
       case 'add-to-set': openAddToSet(s); break;
       case 'share-song': openShare([s], `“${s.title}”`); break;
       case 'print': window.print(); break;
+      case 'listen': openListen(s); break;
       case 'flip-key': {
         const flips = $$('.key-flip', main);
         const show = !flips.some((f) => f.classList.contains('flipped'));
@@ -1418,18 +1428,26 @@
           <div class="fields">
             <label class="field full">Title<input name="title" required value="${esc(s.title)}" placeholder="Song title"></label>
             <label class="field full">Artist / writer<input name="artist" value="${esc(s.artist)}" placeholder="Who wrote or sings it"></label>
+            <div class="field full" id="portraitBox"></div>
             <label class="field">Original key<select name="key">${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <label class="field">We play it in<select name="playKey"><option value="">Same as original</option>${keys.map((k) => `<option value="${esc(k)}"${k === s.playKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <div class="field">Tempo (bpm)<div class="with-btn"><input name="tempo" type="number" inputmode="numeric" min="20" max="300" value="${esc(s.tempo)}" placeholder="72" aria-label="Tempo"><button type="button" class="btn soft" id="tap" title="Tap along to the beat">${icon('hand')}Tap</button></div></div>
             <label class="field time">Time<select name="time">${times.map((t) => `<option${t === s.time ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
             <div class="field full">Tags<input name="tags" value="${esc((s.tags || []).join(', '))}" placeholder="Worship, Communion…" autocomplete="off">
               <div class="tag-suggest" id="tagSug"></div></div>
+ <div class="field full">YouTube link<div class="with-btn"><input name="video" inputmode="url" autocapitalize="off" value="${esc(s.video || '')}" placeholder="Paste a YouTube link (optional)"><button type="button" class="btn soft" id="ytFind" title="Search YouTube, then copy the link back here">${icon('search')}Find</button></div></div>
             <label class="field full">Info<textarea name="info" rows="2" placeholder="Feel, arrangement, capo, who leads it…">${esc(s.info)}</textarea></label>
           </div>
         </form>
         <div class="split">
           <div class="card pane">
             <div class="pane-h"><h2>Lyrics &amp; chords</h2><button type="button" class="link" id="helpBtn">How to write chords</button></div>
+            <div class="get-lyrics">
+              <button type="button" class="btn soft" id="scanBtn">${icon('camera')}Scan paper</button>
+              <button type="button" class="btn soft" id="findBtn">${icon('globe')}Find lyrics online</button>
+              <input type="file" id="scanFile" accept="image/*" hidden>
+            </div>
+            <div class="offer" id="lyricsOffer" hidden></div>
             <div class="chordbar" id="cbar">
               ${[...new Set(chordButtons())].map((c) => `<button type="button" data-ins="[${esc(c)}]">${esc(prettyName(c))}</button>`).join('')}
               <button type="button" data-ins="[]" data-back="1">[ ]</button>
@@ -1538,11 +1556,13 @@ Jesus is the answer</pre>
       ta.focus();
       draw();
     });
+    wireEditorExtras(f, ta, draw);
     $('#helpBtn').addEventListener('click', () => { const h = $('#help'); h.open = true; h.scrollIntoView({ behavior: 'smooth' }); });
 
     $('#save').addEventListener('click', () => {
       const title = f.title.value.trim();
       if (!title) { f.title.focus(); toast('Give the song a title'); return; }
+      if (f.video.value.trim() && !ytParse(f.video.value)) { f.video.focus(); toast('That doesn’t look like a YouTube link'); return; }
       const key = f.key.value;
       const { text, changed } = convertLetters(ta.value.replace(/\s+$/, ''), key);
       const data = {
@@ -1550,6 +1570,7 @@ Jesus is the answer</pre>
         tempo: f.tempo.value ? Math.round(+f.tempo.value) : '',
         time: f.time.value, info: f.info.value.trim(), chart: text, tags: [...new Set(parseTags())], updated: Date.now(),
         playKey: f.playKey.value && f.playKey.value !== key ? f.playKey.value : '',
+        video: f.video.value.trim(),
       };
       let sid;
       if (existing) { Object.assign(existing, data); sid = existing.id; }
@@ -1582,6 +1603,12 @@ Jesus is the answer</pre>
           <div class="srow"><div><b>Text size</b><small>Currently ${prefs.size}px</small></div>
             <div class="seg"><button data-size="-2">A−</button><button data-size="2">A+</button></div></div>
         </section>
+        <section class="card"><h2>Pictures</h2>
+          <div class="srow"><div><b>Song pictures</b><small>Show the key, or a portrait of the artist (found automatically, or add your own photo when editing a song). Portraits need internet the first time.</small></div>
+            ${seg('thumbs', prefs.thumbs, [['key', 'Key'], ['portrait', 'Artist portrait']])}</div>
+          ${Object.keys(portraits).length ? `<div class="srow"><div><b>Saved portraits</b><small>${Object.keys(portraits).length} artist${Object.keys(portraits).length > 1 ? 's' : ''} remembered on this device</small></div>
+            <button class="btn" id="clearPortraits">Clear</button></div>` : ''}
+        </section>
         <section class="card"><h2>Charts</h2>
           <div class="srow"><div><b>Chord names</b><small>How chords are written</small></div>
             ${seg('mode', prefs.mode, [['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']])}</div>
@@ -1611,6 +1638,10 @@ Jesus is the answer</pre>
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
+    $('#clearPortraits')?.addEventListener('click', () => {
+      if (!confirm('Forget all saved artist portraits (including photos you added)?')) return;
+      portraits = {}; writeJSON(PORT_KEY, portraits); toast('Portraits cleared'); viewSettings();
+    });
     $('#scrollSpeed').addEventListener('input', (e) => { prefs.scrollSpeed = +e.target.value; $('#scrollSpeedVal').textContent = e.target.value; });
     $('#scrollSpeed').addEventListener('change', savePrefs);
     $('#myKeySel').addEventListener('change', (e) => {
@@ -1631,7 +1662,7 @@ Jesus is the answer</pre>
   const APP_ID = 'stobite-chords';
   const cleanSong = (s) => ({
     id: s.id, title: s.title, artist: s.artist || '', key: s.key || '', tempo: s.tempo || '', time: s.time || '',
-    info: s.info || '', tags: s.tags || [], chart: s.chart || '', updated: s.updated || 0, playKey: s.playKey || '',
+    info: s.info || '', tags: s.tags || [], chart: s.chart || '', updated: s.updated || 0, playKey: s.playKey || '', video: s.video || '',
   });
   const cleanSet = (s) => ({ id: s.id, name: s.name, date: s.date || '', notes: s.notes || '', items: s.items.map((i) => ({ songId: i.songId, key: i.key || '' })), updated: s.updated || 0 });
   const pack = (list, sets = []) => ({ app: APP_ID, version: 2, exported: new Date().toISOString(), songs: list.map(cleanSong), setlists: sets.map(cleanSet) });
@@ -1749,6 +1780,7 @@ Jesus is the answer</pre>
       tags: Array.isArray(s.tags) ? s.tags.map(String).slice(0, 20) : [],
       chart: String(s.chart ?? s.lyrics ?? ''),
       playKey: String(s.playKey || '').slice(0, 8),
+      video: String(s.video || '').slice(0, 300),
       updated: Number(s.updated) || 0,
     }));
     const outSets = (Array.isArray(obj?.setlists) ? obj.setlists : [])
@@ -1893,10 +1925,12 @@ Jesus is the answer</pre>
     tempo: Number(s.tempo) ? Math.round(Number(s.tempo)) : null, time: (s.time || '').slice(0, 8), info: s.info || '', tags: s.tags || [],
     chart: s.chart || '', updated: s.updated || 0, deleted: false,
     ...(sync.noPlayKey ? {} : { play_key: (s.playKey || '').slice(0, 8) }),
+    ...(sync.noVideo ? {} : { video: (s.video || '').slice(0, 300) }),
   });
   const rowToSong = (r) => ({
     id: r.id, title: r.title, artist: r.artist, key: r.key, tempo: r.tempo ?? '', time: r.time, info: r.info, tags: r.tags || [], chart: r.chart, updated: Number(r.updated) || 0,
     playKey: r.play_key ?? (byId(r.id) || {}).playKey ?? '',
+    video: r.video ?? (byId(r.id) || {}).video ?? '',
   });
   const setToRow = (st) => ({
     team_id: team.id, id: st.id, name: (st.name || '').slice(0, 200), date: (st.date || '').slice(0, 10), notes: st.notes || '',
@@ -1962,11 +1996,13 @@ Jesus is the answer</pre>
         setSync('syncing');
         for (const [table, rows, marks] of [['songs', songRows, synced.songs], ['setlists', setRows, synced.sets]]) {
           for (let i = 0; i < rows.length; i += 200) {
-            const chunk = rows.slice(i, i + 200);
+            let chunk = rows.slice(i, i + 200);
             let { error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' });
-            if (error && table === 'songs' && /play_key/.test(error.message)) {
-              sync.noPlayKey = true; // database not updated yet: sync everything else
-              ({ error } = await sync.client.from(table).upsert(chunk.map(({ play_key, ...rest }) => rest), { onConflict: 'team_id,id' }));
+            for (let tries = 0; error && table === 'songs' && tries < 2; tries++) {
+              // The database may not have the newest optional columns yet: sync everything else.
+              if (/play_key/.test(error.message)) sync.noPlayKey = true; else if (/video/.test(error.message)) sync.noVideo = true; else break;
+              chunk = chunk.map(({ play_key, video, ...rest }) => ({ ...rest, ...(sync.noPlayKey ? {} : { play_key }), ...(sync.noVideo ? {} : { video }) }));
+              ({ error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' }));
             }
             if (error) throw error;
             for (const r of chunk) marks[r.id] = { u: r.updated, d: r.deleted };
@@ -2063,7 +2099,7 @@ Jesus is the answer</pre>
     const withKey = songs.filter((x) => x.playKey);
     if (withKey.length) {
       const { error } = await sync.client.from('songs').upsert(withKey.map(songToRow), { onConflict: 'team_id,id' });
-      if (error) { if (/play_key/.test(error.message)) sync.noPlayKey = true; return; }
+      if (error) { if (/play_key/.test(error.message)) sync.noPlayKey = true; else if (/video/.test(error.message)) sync.noVideo = true; return; }
     }
     writeJSON(flag, true);
   }
@@ -2481,6 +2517,384 @@ Jesus is the answer</pre>
   window.addEventListener('online', () => startSync());
   window.addEventListener('offline', () => { if (team) setSync('offline'); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && team && sync.client) startSync(); });
+
+  /* ================= YouTube, artist portraits, scanning paper, finding lyrics ================= */
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+      const el = document.createElement('script');
+      el.src = src; el.onload = resolve;
+      el.onerror = () => { el.remove(); reject(new Error('No internet connection')); };
+      document.head.append(el);
+    });
+  }
+
+  /** Small "please wait" box we can update while something runs. */
+  function busyModal(text, sub = '') {
+    const d = modal(`<div class="busy"><div class="spin"></div><h2 id="busyT">${esc(text)}</h2><p id="busyS">${esc(sub)}</p></div>`, 'busy-modal');
+    d.addEventListener('cancel', (e) => e.preventDefault());
+    return { set: (t, sub2) => { const a = $('#busyT', d), b = $('#busyS', d); if (a) a.textContent = t; if (b && sub2 != null) b.textContent = sub2; }, close: () => { if (d.open) d.close(); d.remove(); } };
+  }
+
+  // ---------- YouTube ----------
+  /** Understands youtu.be, youtube.com/watch, shorts, embed and music.youtube.com links. */
+  function ytParse(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return null;
+    let u;
+    try { u = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw); } catch { return null; }
+    const host = u.hostname.replace(/^(www|m|music)\./, '');
+    let id = '';
+    if (host === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+    else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+      if (u.pathname === '/watch') id = u.searchParams.get('v') || '';
+      else { const m = /^\/(?:embed|shorts|live|v)\/([\w-]{11})/.exec(u.pathname); if (m) id = m[1]; }
+    }
+    if (!/^[\w-]{11}$/.test(id)) return null;
+    const t = u.searchParams.get('t') || u.searchParams.get('start') || '';
+    const hms = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(t);
+    const start = /^\d+$/.test(t) ? +t : (hms && t ? (+hms[1] || 0) * 3600 + (+hms[2] || 0) * 60 + (+hms[3] || 0) : 0);
+    return { id, start };
+  }
+  const ytSearchURL = (title, artist) => 'https://www.youtube.com/results?search_query=' + enc(`${title || ''} ${artist || ''}`.trim());
+
+  function openListen(s) {
+    const v = ytParse(s.video);
+    if (!v) { window.open(ytSearchURL(s.title, s.artist), '_blank', 'noopener'); return; }
+    const src = `https://www.youtube-nocookie.com/embed/${v.id}?rel=0&playsinline=1${v.start ? '&start=' + v.start : ''}`;
+    modal(`
+      <h2>${esc(s.title)}</h2>
+      <div class="yt"><iframe src="${src}" title="YouTube video player" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+      <div class="row" style="margin-top:14px;justify-content:space-between">
+        <a class="btn ghost" href="https://www.youtube.com/watch?v=${v.id}${v.start ? '&t=' + v.start : ''}" target="_blank" rel="noopener">Open in YouTube</a>
+        <form method="dialog"><button class="btn primary">Close</button></form>
+      </div>`, 'video-modal');
+  }
+
+  // ---------- artist portraits ----------
+  const PORT_KEY = 'stobite-chords:portraits';
+  let portraits = readJSON(PORT_KEY, {}); // artistKey -> { u: image (data URL), own: true if you added it, t: when looked up }
+  if (!portraits || typeof portraits !== 'object' || Array.isArray(portraits)) portraits = {};
+  const savePortraits = () => writeJSON(PORT_KEY, portraits);
+
+  /** "John Newton (1779)" / "Chris Tomlin & Matt Redman" -> the first name we should look up. */
+  function artistQuery(a) {
+    return String(a || '').replace(/\(.*?\)/g, ' ').split(/\s*(?:,|&|\/|;|\+|\bfeat\.?\b|\bft\.?\b|\bwith\b|\band\b|\btr\.)\s*/i)[0].replace(/\s+/g, ' ').trim();
+  }
+  const artistKey = (a) => artistQuery(a).toLowerCase();
+
+  const keyLabel = (s) => esc(prettyKey(s.key) || '—');
+  /** The round/square picture on song cards: the key by default, an artist portrait if chosen in Settings. */
+  function avHTML(s, extra = '') {
+    if (prefs.thumbs !== 'portrait' || !artistKey(s.artist)) return `<span class="av ${extra}"><span class="kl">${keyLabel(s)}</span></span>`;
+    const k = artistKey(s.artist), p = portraits[k];
+    const img = p && p.u ? `<img class="pimg" src="${esc(p.u)}" alt="" onerror="this.parentNode.classList.remove('pic');this.remove()">` : '';
+    return `<span class="av ${extra}${img ? ' pic' : ''}" data-artist="${esc(k)}" data-aname="${esc(artistQuery(s.artist))}">${img}<span class="kl">${keyLabel(s)}</span></span>`;
+  }
+  function paintAv(el, url) {
+    if (!url) return;
+    let img = el.querySelector('.pimg');
+    if (!img) { img = document.createElement('img'); img.className = 'pimg'; img.alt = ''; img.onerror = () => { el.classList.remove('pic'); img.remove(); }; el.prepend(img); }
+    img.src = url;
+    el.classList.add('pic');
+    if (el.classList.contains('hero-av')) el.closest('.hero')?.classList.add('has-pic');
+  }
+
+  const PERSON_RE = /(singer|songwriter|musician|vocalist|\bband\b|musical group|composer|pastor|preacher|clergy|hymn|worship|gospel|poet|choir|\bduo\b|\btrio\b|rapper|minister|evangelist|bishop|priest|organist|pianist|guitarist|recording artist|record producer)/i;
+  const GENERIC_ARTIST = /^(irish|traditional|trad|anonymous|unknown|various|folk|spiritual|african american spiritual|public domain|church|hymn|scottish|welsh|english|german|latin)$/i;
+  async function wikiThumb(name) {
+    if (GENERIC_ARTIST.test(name.trim())) return null; // "Irish", "Traditional"… are not a person
+    const summary = async (title) => {
+      const r = await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + enc(title.replace(/ /g, '_')) + '?redirect=true');
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (d.type !== 'standard' || !PERSON_RE.test(`${d.description || ''} ${(d.extract || '').slice(0, 240)}`)) return null; // right kind of page only
+      return d.thumbnail ? d.thumbnail.source : null;
+    };
+    let url = await summary(name);
+    if (!url) {
+      const r = await fetch('https://en.wikipedia.org/w/api.php?action=query&list=search&srlimit=3&format=json&origin=*&srsearch=' + enc(`${name} singer OR band OR musician OR hymn writer`));
+      const d = r.ok ? await r.json() : null;
+      const words = name.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+      for (const hit of (d && d.query && d.query.search) || []) {
+        const t = hit.title.toLowerCase();
+        if (!words.every((w) => t.includes(w))) continue; // the page must really be about this name
+        url = await summary(hit.title);
+        if (url) break;
+      }
+    }
+    return url;
+  }
+
+  /** Any image (file or URL) -> a small square JPEG data URL, so it is light and works offline. */
+  function squareThumb(src, size = 160) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const c = document.createElement('canvas'); c.width = c.height = size;
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size, size);
+        ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) * 0.2, side, side, 0, 0, size, size); // keep faces: crop a little above centre
+        try { resolve(c.toDataURL('image/jpeg', 0.82)); } catch (e) { reject(e); }
+      };
+      img.onerror = () => reject(new Error('Could not load the picture'));
+      img.src = src;
+    });
+  }
+
+  const portraitBusy = new Set();
+  async function fetchPortrait(k, name) {
+    if (portraitBusy.has(k)) return;
+    portraitBusy.add(k);
+    try {
+      const url = await wikiThumb(name);
+      let u = '';
+      if (url) { try { u = await squareThumb(url); } catch { u = url; } }
+      portraits[k] = { u, t: Date.now() };
+    } catch { return; } // offline: try again next time
+    finally { portraitBusy.delete(k); }
+    savePortraits();
+    for (const el of $$(`.av[data-artist="${CSS.escape(k)}"]`)) paintAv(el, portraits[k].u);
+  }
+
+  /** Look up portraits for artists on screen that we don't know yet (only when portraits are switched on). */
+  async function loadPortraits() {
+    if (prefs.thumbs !== 'portrait' || !navigator.onLine) return;
+    const todo = new Map();
+    for (const el of $$('.av[data-artist]')) {
+      const k = el.dataset.artist, p = portraits[k];
+      if (p && (p.u || p.own || Date.now() - (p.t || 0) < 14 * 864e5)) continue; // known, or looked up recently with no result
+      todo.set(k, el.dataset.aname);
+    }
+    const queue = [...todo];
+    await Promise.all([0, 1, 2].map(async () => { while (queue.length) { const [k, name] = queue.shift(); await fetchPortrait(k, name); } }));
+  }
+
+  // ---------- reading a photographed page ----------
+  const TESS_JS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+
+  /** Photo -> grey, contrast-stretched canvas (much easier for the reader to understand). */
+  function prepPhoto(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file), img = new Image();
+      img.onload = () => {
+        const sc = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * sc)); c.height = Math.max(1, Math.round(img.naturalHeight * sc));
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        const im = ctx.getImageData(0, 0, c.width, c.height), px = im.data, hist = new Uint32Array(256);
+        for (let i = 0; i < px.length; i += 4) { const g = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0; px[i] = g; hist[g]++; }
+        const total = c.width * c.height;
+        let lo = 0, hi = 255, acc = 0;
+        for (let g = 0; g < 256; g++) { acc += hist[g]; if (acc > total * 0.02) { lo = g; break; } }
+        acc = 0;
+        for (let g = 255; g >= 0; g--) { acc += hist[g]; if (acc > total * 0.25) { hi = g; break; } } // paper is the bright majority
+        const span = Math.max(40, hi - lo);
+        for (let i = 0; i < px.length; i += 4) { const v = Math.max(0, Math.min(255, ((px[i] - lo) * 255) / span)); px[i] = px[i + 1] = px[i + 2] = v; }
+        ctx.putImageData(im, 0, 0);
+        resolve(c);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not open that photo')); };
+      img.src = url;
+    });
+  }
+
+  function cleanScanned(raw) {
+    const lines = String(raw || '').replace(/\r/g, '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').split('\n')
+      .map((l) => l.replace(/\s+$/, '')).filter((l) => !/^[\W_]{1,3}$/.test(l.trim()) || !l.trim());
+    const out = [];
+    for (const l of lines) { if (!l.trim() && (!out.length || !out[out.length - 1])) continue; out.push(l.trim() ? l : ''); }
+    while (out.length && !out[out.length - 1]) out.pop();
+    return out.join('\n');
+  }
+
+  async function scanPaper(file) {
+    const busy = busyModal('Preparing the photo…', 'The first time it also downloads the reading tool (a few MB), so it needs internet.');
+    try {
+      const canvas = await prepPhoto(file);
+      busy.set('Loading the reading tool…');
+      await loadScript(TESS_JS);
+      const worker = await window.Tesseract.createWorker('eng', 1, {
+        logger: (m) => {
+          if (m.status === 'recognizing text') busy.set(`Reading the page… ${Math.round(m.progress * 100)}%`, 'Keep this open. Longer pages take a little while.');
+          else if (/load|initiali/i.test(m.status)) busy.set('Loading the reading tool…');
+        },
+      });
+      const { data } = await worker.recognize(canvas);
+      await worker.terminate();
+      busy.close();
+      const text = cleanScanned(data.text);
+      if (text.replace(/\s/g, '').length < 12) { toast('Could not read any words. Try a brighter, flatter, closer photo.'); return null; }
+      return text;
+    } catch (err) {
+      busy.close();
+      toast(navigator.onLine ? 'Could not read the photo: ' + (err.message || err) : 'Reading a photo needs internet the first time');
+      return null;
+    }
+  }
+
+  // ---------- finding lyrics on the internet ----------
+  const stanzaNorm = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  /** Plain lyrics -> Verse / Chorus sections (a stanza that repeats is called Chorus). Editable afterwards. */
+  function structureLyrics(text) {
+    const out = [];
+    let labelled = false;
+    for (const l of String(text).replace(/\r/g, '').split('\n').map((x) => x.replace(/\s+$/, ''))) {
+      const m = /^\s*\[(.+?)\]\s*$/.exec(l);
+      if (m) { if (SECTION_RE.test(m[1])) { labelled = true; out.push('', m[1]); } continue; } // "[Chorus]" becomes a heading; "[Singer name]" is dropped
+      out.push(l);
+    }
+    const joined = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (labelled) return joined;
+    const stanzas = joined.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+    const counts = new Map();
+    stanzas.forEach((x) => counts.set(stanzaNorm(x), (counts.get(stanzaNorm(x)) || 0) + 1));
+    let v = 0;
+    return stanzas.map((x) => `${counts.get(stanzaNorm(x)) > 1 ? 'Chorus' : 'Verse ' + ++v}\n${x}`).join('\n\n');
+  }
+
+  async function lyricsLookup(title, artist) {
+    const found = [];
+    const add = (t, a, album, text) => { if (text && text.trim().length > 20) found.push({ title: t, artist: a, album: album || '', text }); };
+    try {
+      const q = new URLSearchParams({ track_name: title }); if (artist) q.set('artist_name', artist);
+      const r = await fetch('https://lrclib.net/api/search?' + q);
+      if (r.ok) for (const x of await r.json()) add(x.trackName, x.artistName, x.albumName, x.plainLyrics);
+    } catch { /* try the backup below */ }
+    if (!found.length && artist) {
+      try {
+        const r = await fetch(`https://api.lyrics.ovh/v1/${enc(artist)}/${enc(title)}`);
+        if (r.ok) add(title, artist, '', (await r.json()).lyrics);
+      } catch { /* nothing */ }
+    }
+    const seen = new Set(), want = artist.toLowerCase();
+    return found.filter((x) => { const k = stanzaNorm(x.text).slice(0, 120); if (seen.has(k)) return false; seen.add(k); return true; })
+      .sort((a, b) => (b.artist.toLowerCase().includes(want) ? 1 : 0) - (a.artist.toLowerCase().includes(want) ? 1 : 0)).slice(0, 8);
+  }
+
+  /** Everything the song editor needs for photos, lyric search, pictures and the YouTube helper. */
+  function wireEditorExtras(f, ta, draw) {
+    state.offerOff = false;
+    const putLyrics = (text) => {
+      if (ta.value.trim() && !confirm('Replace the lyrics you already have here?\n\nOK = replace them\nCancel = add these at the end')) ta.value = `${ta.value.replace(/\s+$/, '')}\n\n${text}`;
+      else ta.value = text;
+      ta.dispatchEvent(new Event('input'));
+      ta.scrollTop = 0;
+    };
+
+    // scan a paper page
+    $('#scanBtn').addEventListener('click', () => $('#scanFile').click());
+    $('#scanFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      const text = await scanPaper(file);
+      if (!text) return;
+      let lines = text.split('\n');
+      if (!f.title.value.trim() && lines.length > 3 && lines[0].length < 60) { // the title is usually the first line on the page
+        f.title.value = lines.shift().trim();
+        while (lines.length && !lines[0].trim()) lines.shift();
+        f.title.dispatchEvent(new Event('input'));
+      }
+      putLyrics(lines.join('\n'));
+      toast('Added from the photo. Check it over for any mistakes, then add the chords.');
+    });
+
+    // find lyrics online
+    const findLyrics = async () => {
+      const title = f.title.value.trim(), artist = f.artist.value.trim();
+      if (!title) { f.title.focus(); toast('Type the song title first'); return; }
+      if (!navigator.onLine) { toast('Finding lyrics needs internet'); return; }
+      const busy = busyModal('Looking for the lyrics…', `${title}${artist ? ' · ' + artist : ''}`);
+      let results = [];
+      try { results = await lyricsLookup(title, artist); } catch { /* none */ }
+      busy.close();
+      if (!results.length) { toast('No lyrics found. Check the spelling of the title and artist, or scan a paper copy.'); return; }
+      const d = modal(`
+        <h2>Which one?</h2>
+        <p>Tap the right song. You can edit the lyrics afterwards.</p>
+        <div class="pick-list">${results.map((r, i) => `
+          <button class="result" data-i="${i}"><b>${esc(r.title)}</b><span>${esc(r.artist)}${r.album ? ' · ' + esc(r.album) : ''}</span><small>${esc(r.text.trim().split('\n').slice(0, 2).join(' / ').slice(0, 90))}</small></button>`).join('')}</div>
+        <p class="fine">Lyrics come from a free public service. Make sure your church licence (for example CCLI) covers using them.</p>
+        <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form></div>`);
+      d.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-i]');
+        if (!b) return;
+        const r = results[+b.dataset.i];
+        d.close();
+        if (!f.artist.value.trim()) { f.artist.value = r.artist; f.artist.dispatchEvent(new Event('change')); }
+        putLyrics(structureLyrics(r.text));
+        toast('Lyrics added. Now add the chords.');
+      });
+    };
+    $('#findBtn').addEventListener('click', findLyrics);
+
+    // offer to look them up once title + artist are typed and the lyrics box is empty
+    const offer = $('#lyricsOffer');
+    const updateOffer = () => {
+      const title = f.title.value.trim(), artist = f.artist.value.trim();
+      const show = !!(title && artist && !ta.value.trim() && !state.offerOff);
+      offer.hidden = !show;
+      if (show) offer.innerHTML = `<span>${icon('globe')}<span>Pull the lyrics for <b>${esc(title)}</b> by <b>${esc(artist)}</b> from the internet?</span></span>
+        <span class="offer-btns"><button type="button" class="btn primary" data-o="go">Find lyrics</button><button type="button" class="btn ghost" data-o="no">No thanks</button></span>`;
+    };
+    offer.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-o]');
+      if (!b) return;
+      if (b.dataset.o === 'no') { state.offerOff = true; updateOffer(); } else findLyrics();
+    });
+    for (const el of [f.title, f.artist]) { el.addEventListener('input', updateOffer); el.addEventListener('change', updateOffer); }
+    ta.addEventListener('input', updateOffer);
+    updateOffer();
+
+    // YouTube: search helper
+    $('#ytFind').addEventListener('click', () => {
+      if (!f.title.value.trim()) { f.title.focus(); toast('Type the song title first'); return; }
+      window.open(ytSearchURL(f.title.value, f.artist.value), '_blank', 'noopener');
+      toast('Copy the link of the right video, then paste it here');
+    });
+
+    // artist picture
+    const box = $('#portraitBox');
+    const drawPortraitBox = () => {
+      const k = artistKey(f.artist.value);
+      if (!k) { box.innerHTML = ''; return; }
+      const p = portraits[k];
+      box.innerHTML = `<div class="pbox">
+        <span class="pthumb">${p && p.u ? `<img src="${esc(p.u)}" alt="">` : icon('image')}</span>
+        <div class="ptext"><b>Artist picture</b><small>${p && p.own ? 'Your photo' : p && p.u ? 'Found automatically' : portraitBusy.has(k) ? 'Looking…' : 'None yet'}${prefs.thumbs === 'portrait' ? '' : ' · shown when Settings → Song pictures is Artist portrait'}</small></div>
+        <div class="pbtns"><button type="button" class="btn soft" id="pPick">Choose photo</button>${p ? '<button type="button" class="btn ghost" id="pAuto">Find automatically</button>' : '<button type="button" class="btn ghost" id="pAuto">Find</button>'}</div>
+        <input type="file" id="pFile" accept="image/*" hidden></div>`;
+      $('#pPick').addEventListener('click', () => $('#pFile').click());
+      $('#pFile').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          const url = URL.createObjectURL(file);
+          portraits[k] = { u: await squareThumb(url), own: true, t: Date.now() };
+          URL.revokeObjectURL(url);
+          savePortraits(); drawPortraitBox(); toast('Picture saved on this device');
+        } catch (err) { toast(err.message || 'Could not use that photo'); }
+      });
+      $('#pAuto').addEventListener('click', async () => {
+        if (!navigator.onLine) { toast('Needs internet'); return; }
+        delete portraits[k];
+        const run = fetchPortrait(k, artistQuery(f.artist.value));
+        drawPortraitBox();
+        await run;
+        drawPortraitBox();
+        if (!(portraits[k] && portraits[k].u)) toast('No picture found for that name. You can choose your own photo.');
+      });
+    };
+    f.artist.addEventListener('change', drawPortraitBox);
+    f.artist.addEventListener('input', () => { clearTimeout(state.pbT); state.pbT = setTimeout(drawPortraitBox, 400); });
+    drawPortraitBox();
+  }
 
   /* ================= misc ================= */
   let toastTimer;

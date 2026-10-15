@@ -32,6 +32,9 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 - Tap any chord to see its letter name and notes on a keyboard, in the key being played.
 - Three keys per song: the original, the key the band plays it in (set on the song, or per setlist), and your own transposition (just for you, on your device). Tap the key card to flip to the original; tap again to flip back.
 - Song bar order: Full screen, text size, Transpose, Keys / Bass / Lyrics, then 1 2 3 / do re mi / C D E. Your default view is set in Settings.
+- YouTube link on each song (a Listen button plays it in the app; with no link it searches YouTube for the song).
+- Scan paper: photograph a printed lyric page and it is read into the lyrics box (reading tool downloads the first time). Find lyrics online: type the title and artist and the app offers to pull the lyrics from a free public service (LRCLIB).
+- Artist portraits: Settings → Song pictures can show the artist's photo (found on Wikipedia, or your own photo) instead of the key.
 - Delete a song from its page, or tap Select in the library to delete several at once (with Undo).
 - Keys, Bass (bass note only) or Lyrics-only view.
 - Setlists with a date, notes and a key per song. Swipe or use the ←/→ keys to move between songs.

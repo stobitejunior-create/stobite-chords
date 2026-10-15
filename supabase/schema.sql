@@ -196,3 +196,6 @@ end $$;
 
 revoke all on function public.check_admin(text), public.claim_leader(uuid, text) from public, anon;
 grant execute on function public.check_admin(text), public.claim_leader(uuid, text) to authenticated;
+
+-- ---------- update 5: YouTube link on each song ----------
+alter table public.songs add column if not exists video text not null default '' check (char_length(video) <= 300);
