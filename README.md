@@ -16,6 +16,10 @@ Host the folder on any static host, for example Netlify Drop (drag the folder on
 
 Without a team, each device keeps its own library. Use **Share** to move songs between people or devices.
 
+## Publishing an update
+
+Type `rebuild-chords` in Terminal. It checks the code, bumps the version (shown at the bottom of Settings), commits, does a plain push to GitHub and waits until the live site has it. `rebuild-chords "what changed"` adds your own message; `rebuild-chords same` publishes without bumping the version.
+
 ## Team sync (Supabase)
 
 Settings → Team → **Create a team** gives a code and an invite link. Everyone in the team shares one library and one set of setlists, and changes show up live on every device. Each device also keeps a copy, so it works offline and syncs when it's back online. When two people edit the same song, the newest edit wins.
