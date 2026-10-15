@@ -199,3 +199,29 @@ grant execute on function public.check_admin(text), public.claim_leader(uuid, te
 
 -- ---------- update 5: YouTube link on each song ----------
 alter table public.songs add column if not exists video text not null default '' check (char_length(video) <= 300);
+
+-- ---------- update 6: artists shared with the team (name + portrait) ----------
+create table if not exists public.artists (
+  team_id uuid not null references public.teams (id) on delete cascade,
+  id text not null check (char_length(id) <= 64),
+  name text not null default '' check (char_length(name) <= 200),
+  photo text not null default '' check (char_length(photo) <= 90000),
+  src text not null default '' check (src in ('', 'auto', 'own')),
+  updated bigint not null default 0,
+  deleted boolean not null default false,
+  updated_by uuid default auth.uid(),
+  primary key (team_id, id)
+);
+alter table public.artists enable row level security;
+
+drop policy if exists "members read artists" on public.artists;
+create policy "members read artists" on public.artists for select using (public.is_member(team_id));
+drop policy if exists "members add artists" on public.artists;
+create policy "members add artists" on public.artists for insert with check (public.is_member(team_id));
+drop policy if exists "members edit artists" on public.artists;
+create policy "members edit artists" on public.artists for update using (public.is_member(team_id)) with check (public.is_member(team_id));
+
+do $$
+begin
+  begin alter publication supabase_realtime add table public.artists; exception when duplicate_object then null; end;
+end $$;

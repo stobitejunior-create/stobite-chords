@@ -52,13 +52,14 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 22; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 23; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
   const SET_KEY = 'stobite-chords:setlists';
   const PREF_KEY = 'stobite-chords:prefs';
   const TEAM_KEY = 'stobite-chords:team';
+  const ART_KEY = 'stobite-chords:artists';
 
   function readJSON(key, fallback) {
     try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
@@ -75,10 +76,11 @@
   const setKey = () => (team ? spaceKey('setlists') : SET_KEY);
   const syncedKey = () => spaceKey('synced');
   const sync = { client: null, channel: null, status: 'off', detail: '', timer: 0, pushing: false, again: false, members: [], userId: null, pendingRefresh: false };
-  let synced = { songs: {}, sets: {} }; // what the server has: id -> { u: updated, d: deleted }
+  let synced = { songs: {}, sets: {}, artists: {} }; // what the server has: id -> { u: updated, d: deleted }
 
   const starterById = Object.fromEntries(STARTER_SONGS.map((s) => [s.id, s]));
-  let songs = [], setlists = [];
+  let songs = [], setlists = [], artists = [];
+  function artistsKey() { return team ? spaceKey('artists') : ART_KEY; }
   function loadSpace() {
     songs = readJSON(libKey(), null);
     if (!Array.isArray(songs)) songs = team ? [] : STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] }));
@@ -87,11 +89,14 @@
     }
     setlists = readJSON(setKey(), []);
     if (!Array.isArray(setlists)) setlists = [];
-    synced = team ? readJSON(syncedKey(), { songs: {}, sets: {} }) : { songs: {}, sets: {} };
+    synced = team ? readJSON(syncedKey(), { songs: {}, sets: {}, artists: {} }) : { songs: {}, sets: {}, artists: {} };
+    if (!synced.artists) synced.artists = {};
+    artists = readJSON(artistsKey(), []);
+    if (!Array.isArray(artists)) artists = [];
   }
   loadSpace();
   const prefs = Object.assign(
-    { mode: 'numbers', part: 'keys', thumbs: 'key', size: 20, theme: 'auto', favs: [], recent: [], metroSound: true, sort: 'title', scrollSpeed: 3 },
+    { mode: 'numbers', part: 'keys', pictures: 'portrait', size: 20, theme: 'auto', favs: [], recent: [], metroSound: true, sort: 'title', scrollSpeed: 3 },
     readJSON(PREF_KEY, {}),
   );
   delete prefs.shift; delete prefs.defaultShift; // replaced by myKey / songKeys
@@ -853,7 +858,7 @@
       </header>
       <div class="content narrow">
         <section class="hero" style="--h:${hueOf(s.title)}">
-          ${prefs.thumbs === 'portrait' && s.artist ? avHTML(s, 'hero-av') : ''}
+          ${prefs.pictures !== 'key' && s.artist ? avHTML(s, 'hero-av') : ''}
           <div>
             ${set ? `<a class="eyebrow" href="#/set/${enc(set.id)}">${icon('list')}${esc(set.name)} · ${idx + 1} of ${set.items.length}</a>`
               : s.tags && s.tags.length ? `<span class="eyebrow">${esc(s.tags.join(' · '))}</span>` : ''}
@@ -1149,7 +1154,7 @@
       else { const k = $('#f').key.value; openChord(ch.dataset.ch, k, k); }
       return;
     }
-    const b = e.target.closest('[data-act],[data-mode],[data-part],[data-size],[data-theme-set],[data-thumbs]');
+    const b = e.target.closest('[data-act],[data-mode],[data-part],[data-size],[data-theme-set],[data-pictures]');
     if (!b) return;
     const s = state.song;
     const inSong = state.route && state.route.name === 'song';
@@ -1160,7 +1165,7 @@
       return;
     }
     if (b.dataset.size) { changeSize(+b.dataset.size); if (!inSong) viewSettings(); return; }
-    if (b.dataset.thumbs) { prefs.thumbs = b.dataset.thumbs; savePrefs(); viewSettings(); return; }
+    if (b.dataset.pictures) { prefs.pictures = b.dataset.pictures; savePrefs(); viewSettings(); return; }
     if (b.dataset.themeSet) { prefs.theme = b.dataset.themeSet; savePrefs(); applyTheme(); viewSettings(); return; }
     switch (b.dataset.act) {
       case 'import': openImport(); break;
@@ -1427,8 +1432,10 @@
         <form class="card" id="f" onsubmit="return false">
           <div class="fields">
             <label class="field full">Title<input name="title" required value="${esc(s.title)}" placeholder="Song title"></label>
-            <label class="field full">Artist / writer<input name="artist" value="${esc(s.artist)}" placeholder="Who wrote or sings it"></label>
-            <div class="field full" id="portraitBox"></div>
+            <div class="field full">Artist / writer
+              <select name="artistSel" aria-label="Artist"></select>
+              <input type="hidden" name="artist" value="${esc(s.artist)}">
+              <div id="portraitBox"></div></div>
             <label class="field">Original key<select name="key">${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <label class="field">We play it in<select name="playKey"><option value="">Same as original</option>${keys.map((k) => `<option value="${esc(k)}"${k === s.playKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <div class="field">Tempo (bpm)<div class="with-btn"><input name="tempo" type="number" inputmode="numeric" min="20" max="300" value="${esc(s.tempo)}" placeholder="72" aria-label="Tempo"><button type="button" class="btn soft" id="tap" title="Tap along to the beat">${icon('hand')}Tap</button></div></div>
@@ -1576,6 +1583,7 @@ Jesus is the answer</pre>
       if (existing) { Object.assign(existing, data); sid = existing.id; }
       else { sid = uid(); songs.push({ id: sid, ...data }); }
       if (!saveLibrary()) return;
+      ensureArtists();
       toast(changed ? `Saved. ${changed} letter chord${changed > 1 ? 's' : ''} turned into numbers (key of ${prettyKey(key)})` : 'Saved');
       go('#/s/' + enc(sid));
     });
@@ -1603,11 +1611,14 @@ Jesus is the answer</pre>
           <div class="srow"><div><b>Text size</b><small>Currently ${prefs.size}px</small></div>
             <div class="seg"><button data-size="-2">A−</button><button data-size="2">A+</button></div></div>
         </section>
-        <section class="card"><h2>Pictures</h2>
-          <div class="srow"><div><b>Song pictures</b><small>Show the key, or a portrait of the artist (found automatically, or add your own photo when editing a song). Portraits need internet the first time.</small></div>
-            ${seg('thumbs', prefs.thumbs, [['key', 'Key'], ['portrait', 'Artist portrait']])}</div>
-          ${Object.keys(portraits).length ? `<div class="srow"><div><b>Saved portraits</b><small>${Object.keys(portraits).length} artist${Object.keys(portraits).length > 1 ? 's' : ''} remembered on this device</small></div>
-            <button class="btn" id="clearPortraits">Clear</button></div>` : ''}
+        <section class="card"><h2>Artists</h2>
+          <div class="srow"><div><b>Song pictures</b><small>Show each artist's portrait on their songs (the key is used when an artist has no portrait).</small></div>
+            ${seg('pictures', prefs.pictures, [['portrait', 'Artist portrait'], ['key', 'Key']])}</div>
+          <div class="art-list">${sortedArtists().map((a) => `
+            <div class="art-row"><span class="pthumb">${a.photo ? `<img src="${esc(a.photo)}" alt="">` : icon('image')}</span>
+              <span class="art-name"><b>${esc(a.name)}</b><small>${songsBy(a).length} song${songsBy(a).length === 1 ? '' : 's'}${team ? ' · shared with the team' : ''}</small></span>
+              <button class="btn ghost" data-art-edit="${esc(a.id)}">Edit</button></div>`).join('') || '<p class="sub" style="padding:8px 0">No artists yet. They appear when you add a song.</p>'}</div>
+          <div class="team-actions" style="margin-top:12px"><button class="btn soft" id="artAdd">${icon('plus')}Add artist</button></div>
         </section>
         <section class="card"><h2>Charts</h2>
           <div class="srow"><div><b>Chord names</b><small>How chords are written</small></div>
@@ -1638,10 +1649,9 @@ Jesus is the answer</pre>
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
-    $('#clearPortraits')?.addEventListener('click', () => {
-      if (!confirm('Forget all saved artist portraits (including photos you added)?')) return;
-      portraits = {}; writeJSON(PORT_KEY, portraits); toast('Portraits cleared'); viewSettings();
-    });
+    $('#artAdd')?.addEventListener('click', () => openArtistEditor(null, () => viewSettings()));
+    for (const b of $$('[data-art-edit]')) b.addEventListener('click', () => openArtistEditor(artistById(b.dataset.artEdit), () => viewSettings()));
+    loadPortraits();
     $('#scrollSpeed').addEventListener('input', (e) => { prefs.scrollSpeed = +e.target.value; $('#scrollSpeedVal').textContent = e.target.value; });
     $('#scrollSpeed').addEventListener('change', savePrefs);
     $('#myKeySel').addEventListener('change', (e) => {
@@ -1665,7 +1675,11 @@ Jesus is the answer</pre>
     info: s.info || '', tags: s.tags || [], chart: s.chart || '', updated: s.updated || 0, playKey: s.playKey || '', video: s.video || '',
   });
   const cleanSet = (s) => ({ id: s.id, name: s.name, date: s.date || '', notes: s.notes || '', items: s.items.map((i) => ({ songId: i.songId, key: i.key || '' })), updated: s.updated || 0 });
-  const pack = (list, sets = []) => ({ app: APP_ID, version: 2, exported: new Date().toISOString(), songs: list.map(cleanSong), setlists: sets.map(cleanSet) });
+  const cleanArtist = (a) => ({ id: a.id, name: a.name, photo: a.photo || '', src: a.src || '', updated: a.updated || 0 });
+  const pack = (list, sets = []) => ({
+    app: APP_ID, version: 3, exported: new Date().toISOString(), songs: list.map(cleanSong), setlists: sets.map(cleanSet),
+    artists: [...new Set(list.map(artistOf).filter(Boolean))].map(cleanArtist),
+  });
   const safeName = (s) => s.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'songs';
 
   function b64u(bytes) {
@@ -1790,7 +1804,10 @@ Jesus is the answer</pre>
         items: s.items.filter((i) => i && typeof i.songId === 'string').map((i) => ({ songId: i.songId, key: String(i.key || '') })),
         updated: Number(s.updated) || 0,
       }));
-    return { songs: outSongs, setlists: outSets };
+    const outArtists = (Array.isArray(obj?.artists) ? obj.artists : [])
+      .filter((a) => a && typeof a.name === 'string' && a.name.trim() && typeof a.photo === 'string' && a.photo.length < 90000)
+      .map((a) => ({ id: typeof a.id === 'string' && a.id ? a.id : 'a-' + nameHash(normName(a.name)), name: a.name.trim().slice(0, 200), photo: a.photo, src: a.src === 'own' ? 'own' : a.src === 'auto' ? 'auto' : '', updated: Number(a.updated) || 0, derived: false }));
+    return { songs: outSongs, setlists: outSets, artists: outArtists };
   }
 
   async function parseImportText(text) {
@@ -1818,7 +1835,13 @@ Jesus is the answer</pre>
       if (!mine) { setlists.push(st); setsAdded++; }
       else if ((st.updated || 0) > (mine.updated || 0)) { Object.assign(mine, st); setsAdded++; }
     }
-    saveLibrary(); saveSets(); renderNav();
+    // artists that came with the songs: add the ones we don't have; fill in a missing portrait
+    for (const a of data.artists || []) {
+      const mine = artistByName(a.name);
+      if (!mine) { artists.push({ ...a, updated: Math.max(a.updated || 0, 2) }); }
+      else if (!mine.photo && a.photo) { mine.photo = a.photo; mine.src = a.src; mine.updated = Date.now(); mine.derived = false; }
+    }
+    saveLibrary(); saveSets(); ensureArtists(); saveArtists(); renderNav();
     const parts = [];
     if (added) parts.push(`${added} song${added > 1 ? 's' : ''} added`);
     if (updated) parts.push(`${updated} updated`);
@@ -1837,10 +1860,10 @@ Jesus is the answer</pre>
     const done = () => { d.close(); route(); };
     $('#imf', d).addEventListener('change', async (e) => {
       try {
-        const all = { songs: [], setlists: [] };
+        const all = { songs: [], setlists: [], artists: [] };
         for (const file of e.target.files) {
           const p = extractPayload(JSON.parse(await file.text()));
-          all.songs.push(...p.songs); all.setlists.push(...p.setlists);
+          all.songs.push(...p.songs); all.setlists.push(...p.setlists); all.artists.push(...p.artists);
         }
         mergeAll(all); done();
       } catch (err) { toast('Could not read that file: ' + err.message); }
@@ -1941,6 +1964,72 @@ Jesus is the answer</pre>
   const blankSet = (id, u) => ({ ...setToRow({ id, name: '' }), updated: u, deleted: true });
 
   /** Merge rows from the server into this device. Newest edit wins. Returns true if anything changed here. */
+  const artistToRow = (a) => ({ team_id: team.id, id: a.id, name: (a.name || '').slice(0, 200), photo: a.photo || '', src: a.src || '', updated: a.updated || 0, deleted: false });
+  const rowToArtist = (r) => ({ id: r.id, name: r.name, photo: r.photo || '', src: r.src || '', updated: Number(r.updated) || 0, derived: false });
+  const missingArtistsTable = (err) => /artists|schema cache|relation/i.test((err && err.message) || '');
+
+  /** Merge artist rows from the team into this device (newest edit wins). */
+  function applyRemoteArtists(rows) {
+    let changed = false;
+    for (const r of rows) {
+      const u = Number(r.updated) || 0, mine = artistById(r.id), mark = synced.artists[r.id];
+      if (r.deleted) {
+        if (mine && (mine.updated || 0) <= u) { artists.splice(artists.indexOf(mine), 1); changed = true; }
+        if (!mine || (mine.updated || 0) <= u) synced.artists[r.id] = { u, d: true };
+      } else if (!mine) {
+        if (mark && !mark.d && u <= mark.u) continue; // deleted here, not sent yet
+        artists.push(rowToArtist(r)); synced.artists[r.id] = { u, d: false }; changed = true;
+      } else if (u > (mine.updated || 0)) {
+        Object.assign(mine, rowToArtist(r)); synced.artists[r.id] = { u, d: false }; changed = true;
+      } else if (u === (mine.updated || 0)) synced.artists[r.id] = { u, d: false };
+    }
+    if (changed) writeJSON(artistsKey(), artists);
+    writeJSON(syncedKey(), synced);
+    return changed;
+  }
+
+  async function pullArtists() {
+    if (!team || !sync.client || sync.noArtists) return;
+    try {
+      const rows = await fetchAll('artists');
+      const changed = applyRemoteArtists(rows);
+      ensureArtists();
+      if (changed) refreshView();
+      if (!sync.artChannel) subscribeArtists();
+    } catch (err) { if (missingArtistsTable(err)) sync.noArtists = true; } // database not updated yet: artists stay on this device
+  }
+
+  async function pushArtists() {
+    if (!team || !sync.client || sync.noArtists) return;
+    try {
+      const now = Date.now();
+      const dirty = artists.filter((a) => { const m = synced.artists[a.id]; return !m || m.d || (a.updated || 0) > m.u; });
+      const real = dirty.filter((a) => !a.derived).map(artistToRow);
+      const soft = dirty.filter((a) => a.derived).map(artistToRow); // made automatically from song names: never overwrite what the team already has
+      for (const [id, m] of Object.entries(synced.artists)) {
+        if (!m.d && !artistById(id)) real.push({ ...artistToRow({ id, name: '', updated: Math.max(now, m.u + 1) }), deleted: true });
+      }
+      for (const [list, opts] of [[real, { onConflict: 'team_id,id' }], [soft, { onConflict: 'team_id,id', ignoreDuplicates: true }]]) {
+        for (let i = 0; i < list.length; i += 100) {
+          const chunk = list.slice(i, i + 100);
+          const { error } = await sync.client.from('artists').upsert(chunk, opts);
+          if (error) throw error;
+          for (const r of chunk) synced.artists[r.id] = { u: r.updated, d: r.deleted };
+        }
+      }
+      if (real.length || soft.length) writeJSON(syncedKey(), synced);
+    } catch (err) { if (missingArtistsTable(err)) sync.noArtists = true; }
+  }
+
+  function subscribeArtists() {
+    if (sync.artChannel) sync.client.removeChannel(sync.artChannel);
+    sync.artChannel = sync.client.channel('team-art-' + team.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'artists', filter: `team_id=eq.${team.id}` }, (p) => {
+        if (p.new && p.new.id && applyRemoteArtists([p.new])) { ensureArtists(); refreshView(); }
+      })
+      .subscribe();
+  }
+
   function applyRemote(songRows = [], setRows = []) {
     let changed = false;
     const merge = (rows, list, marks, toLocal, find) => {
@@ -1959,7 +2048,7 @@ Jesus is the answer</pre>
     };
     merge(songRows, songs, synced.songs, rowToSong, byId);
     merge(setRows, setlists, synced.sets, rowToSet, setById);
-    if (changed) { writeJSON(libKey(), songs); writeJSON(setKey(), setlists); }
+    if (changed) { writeJSON(libKey(), songs); writeJSON(setKey(), setlists); ensureArtists(); }
     writeJSON(syncedKey(), synced);
     return changed;
   }
@@ -2010,6 +2099,7 @@ Jesus is the answer</pre>
         }
         writeJSON(syncedKey(), synced);
       } while (sync.again);
+      await pushArtists();
       setSync('synced');
     } catch (err) {
       setSync(navigator.onLine ? 'error' : 'offline', err.message || String(err));
@@ -2081,6 +2171,7 @@ Jesus is the answer</pre>
       }
       writeJSON(TEAM_KEY, team);
       await pullAll();
+      await pullArtists();
       await backfillPlayKeys();
       subscribe();
       loadMembers();
@@ -2122,17 +2213,21 @@ Jesus is the answer</pre>
   document.addEventListener('focusout', () => { if (sync.pendingRefresh) { sync.pendingRefresh = false; setTimeout(refreshView, 50); } });
 
   /** Switch this device into a team's library (or back to personal when t is null). */
-  function enterTeam(t, startingSongs, startingSets) {
+  function enterTeam(t, startingSongs, startingSets, startingArtists) {
     if (sync.channel && sync.client) { sync.client.removeChannel(sync.channel); sync.channel = null; }
+    if (sync.artChannel && sync.client) { sync.client.removeChannel(sync.artChannel); sync.artChannel = null; }
+    sync.noArtists = false;
     team = t;
     if (team) {
       writeJSON(TEAM_KEY, team);
       if (startingSongs) writeJSON(libKey(), startingSongs);
       if (startingSets) writeJSON(setKey(), startingSets);
+      if (startingArtists) writeJSON(artistsKey(), startingArtists);
     } else {
       try { localStorage.removeItem(TEAM_KEY); } catch { /* ignore */ }
     }
     loadSpace();
+    ensureArtists();
     sync.members = [];
     setSync(team ? 'syncing' : 'off');
     renderNav();
@@ -2163,7 +2258,7 @@ Jesus is the answer</pre>
         if (error) throw error;
         prefs.myName = me; savePrefs();
         const copy = $('#tCopy', d).checked;
-        enterTeam({ id: data.id, name: data.name, code: data.join_code, role: 'leader', myName: me }, copy ? copyOf(songs) : [], copy ? copyOf(setlists) : []);
+        enterTeam({ id: data.id, name: data.name, code: data.join_code, role: 'leader', myName: me }, copy ? copyOf(songs) : [], copy ? copyOf(setlists) : [], copy ? copyOf(artists) : []);
         d.close();
         toast(`Team “${data.name}” created`);
         go('#/settings');
@@ -2224,7 +2319,7 @@ Jesus is the answer</pre>
       try {
         if (sync.client && sync.userId) await sync.client.from('team_members').delete().eq('team_id', old.id).eq('user_id', sync.userId);
       } catch { /* offline: leaving locally is still fine */ }
-      for (const k of ['songs', 'setlists', 'synced']) { try { localStorage.removeItem(`stobite-chords:team:${old.id}:${k}`); } catch { /* ignore */ } }
+      for (const k of ['songs', 'setlists', 'artists', 'synced']) { try { localStorage.removeItem(`stobite-chords:team:${old.id}:${k}`); } catch { /* ignore */ } }
       enterTeam(null);
       if (x === 'keep') mergeAll({ songs: teamSongs, setlists: teamSets });
       d.close();
@@ -2571,25 +2666,76 @@ Jesus is the answer</pre>
       </div>`, 'video-modal');
   }
 
-  // ---------- artist portraits ----------
-  const PORT_KEY = 'stobite-chords:portraits';
-  let portraits = readJSON(PORT_KEY, {}); // artistKey -> { u: image (data URL), own: true if you added it, t: when looked up }
-  if (!portraits || typeof portraits !== 'object' || Array.isArray(portraits)) portraits = {};
-  const savePortraits = () => writeJSON(PORT_KEY, portraits);
+  // ---------- artists: shared items with a name and a portrait ----------
+  const TRIED_KEY = 'stobite-chords:portrait-tried';
+  const OLD_PORT_KEY = 'stobite-chords:portraits'; // before artists were shared
+  const normName = (n) => String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const artistById = (id) => artists.find((x) => x.id === id);
+  const artistByName = (n) => { const k = normName(n); return k ? artists.find((x) => normName(x.name) === k) || null : null; };
+  const artistOf = (song) => artistByName(song.artist);
+  const sortedArtists = () => [...artists].sort((x, y) => x.name.localeCompare(y.name));
+  const songsBy = (a) => songs.filter((x) => normName(x.artist) === normName(a.name));
+  const nameHash = (str) => { let h = 5381; for (const ch of str) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; return h.toString(36); };
+  const saveArtists = () => { writeJSON(artistsKey(), artists); scheduleSync(); };
 
   /** "John Newton (1779)" / "Chris Tomlin & Matt Redman" -> the first name we should look up. */
   function artistQuery(a) {
     return String(a || '').replace(/\(.*?\)/g, ' ').split(/\s*(?:,|&|\/|;|\+|\bfeat\.?\b|\bft\.?\b|\bwith\b|\band\b|\btr\.)\s*/i)[0].replace(/\s+/g, ' ').trim();
   }
-  const artistKey = (a) => artistQuery(a).toLowerCase();
+
+  /** The same name makes the same id on every phone, so two people adding "Hillsong" end up with one artist. */
+  function newArtist(name, extra = {}) {
+    name = String(name).trim().replace(/\s+/g, ' ');
+    let id = 'a-' + nameHash(normName(name));
+    while (artistById(id)) id += Math.random().toString(36).slice(2, 4);
+    const a = { id, name, photo: '', src: '', updated: Date.now(), derived: false, ...extra };
+    artists.push(a);
+    return a;
+  }
+
+  /** Every artist named on a song gets an artist item (made quietly from the song, so nothing is lost or retyped). */
+  function ensureArtists() {
+    let changed = false;
+    for (const song of songs) {
+      if (!song.artist || artistByName(song.artist)) continue;
+      const a = newArtist(song.artist, { updated: 1, derived: true });
+      if (synced.artists && synced.artists[a.id] && synced.artists[a.id].d) { a.updated = Date.now(); a.derived = false; } // it was deleted before: bring it back
+      changed = true;
+    }
+    // two items with the same name (can happen while an edit is still travelling): keep the one with a portrait
+    const seen = new Map();
+    for (const a of [...artists]) {
+      const k = normName(a.name), keep = seen.get(k);
+      if (!keep) { seen.set(k, a); continue; }
+      const better = (x, y) => (x.photo ? 2 : 0) + (x.derived ? 0 : 1) - ((y.photo ? 2 : 0) + (y.derived ? 0 : 1));
+      const [win, lose] = better(a, keep) > 0 ? [a, keep] : [keep, a];
+      seen.set(k, win);
+      artists.splice(artists.indexOf(lose), 1);
+      changed = true;
+    }
+    // portraits saved on this device before artists were shared
+    const old = readJSON(OLD_PORT_KEY, null);
+    if (old && typeof old === 'object') {
+      for (const [k, v] of Object.entries(old)) {
+        const a = v && v.u && artists.find((x) => normName(artistQuery(x.name)) === k && !x.photo);
+        if (a) { a.photo = v.u; a.src = v.own ? 'own' : 'auto'; a.updated = Date.now(); a.derived = false; changed = true; }
+      }
+      try { localStorage.removeItem(OLD_PORT_KEY); } catch { /* ignore */ }
+    }
+    if (changed) saveArtists();
+    return changed;
+  }
 
   const keyLabel = (s) => esc(prettyKey(s.key) || '—');
-  /** The round/square picture on song cards: the key by default, an artist portrait if chosen in Settings. */
+  /**
+   * The picture on song cards: the artist's portrait when there is one, otherwise the key.
+   * (Settings → Song pictures can switch it back to always showing the key.)
+   */
   function avHTML(s, extra = '') {
-    if (prefs.thumbs !== 'portrait' || !artistKey(s.artist)) return `<span class="av ${extra}"><span class="kl">${keyLabel(s)}</span></span>`;
-    const k = artistKey(s.artist), p = portraits[k];
-    const img = p && p.u ? `<img class="pimg" src="${esc(p.u)}" alt="" onerror="this.parentNode.classList.remove('pic');this.remove()">` : '';
-    return `<span class="av ${extra}${img ? ' pic' : ''}" data-artist="${esc(k)}" data-aname="${esc(artistQuery(s.artist))}">${img}<span class="kl">${keyLabel(s)}</span></span>`;
+    const a = prefs.pictures === 'key' ? null : artistOf(s);
+    if (!a) return `<span class="av ${extra}"><span class="kl">${keyLabel(s)}</span></span>`;
+    const img = a.photo ? `<img class="pimg" src="${esc(a.photo)}" alt="" onerror="this.parentNode.classList.remove('pic');this.remove()">` : '';
+    return `<span class="av ${extra}${img ? ' pic' : ''}" data-artist="${esc(a.id)}">${img}<span class="kl">${keyLabel(s)}</span></span>`;
   }
   function paintAv(el, url) {
     if (!url) return;
@@ -2606,6 +2752,7 @@ Jesus is the answer</pre>
     if (GENERIC_ARTIST.test(name.trim())) return null; // "Irish", "Traditional"… are not a person
     const summary = async (title) => {
       const r = await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + enc(title.replace(/ /g, '_')) + '?redirect=true');
+      if (r.status === 429 || r.status >= 500) throw new Error('busy'); // not "no such person": try again later
       if (!r.ok) return null;
       const d = await r.json();
       if (d.type !== 'standard' || !PERSON_RE.test(`${d.description || ''} ${(d.extract || '').slice(0, 240)}`)) return null; // right kind of page only
@@ -2613,13 +2760,16 @@ Jesus is the answer</pre>
     };
     let url = await summary(name);
     if (!url) {
-      const r = await fetch('https://en.wikipedia.org/w/api.php?action=query&list=search&srlimit=3&format=json&origin=*&srsearch=' + enc(`${name} singer OR band OR musician OR hymn writer`));
-      const d = r.ok ? await r.json() : null;
-      const words = name.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
-      for (const hit of (d && d.query && d.query.search) || []) {
-        const t = hit.title.toLowerCase();
-        if (!words.every((w) => t.includes(w))) continue; // the page must really be about this name
-        url = await summary(hit.title);
+      const words = name.toLowerCase().split(/\s+/).filter((w) => w.length > 2 && !w.endsWith('.')); // initials like "B." never match a full page title
+      for (const q of [name, `${name} hymn writer`, `${name} singer OR band OR musician`]) {
+        const r = await fetch('https://en.wikipedia.org/w/api.php?action=query&list=search&srlimit=4&format=json&origin=*&srsearch=' + enc(q));
+        const d = r.ok ? await r.json() : null;
+        for (const hit of (d && d.query && d.query.search) || []) {
+          const t = hit.title.toLowerCase();
+          if (!words.every((w) => t.includes(w))) continue; // the page must really be about this name
+          url = await summary(hit.title);
+          if (url) break;
+        }
         if (url) break;
       }
     }
@@ -2644,32 +2794,112 @@ Jesus is the answer</pre>
     });
   }
 
+  let tried = readJSON(TRIED_KEY, {}); // artists we searched for and found nothing (this device only, retry after 2 weeks)
   const portraitBusy = new Set();
-  async function fetchPortrait(k, name) {
-    if (portraitBusy.has(k)) return;
-    portraitBusy.add(k);
+  /** Look an artist up on Wikipedia and keep the portrait on the artist (so the whole team gets it). */
+  async function fetchPortrait(id, force = false) {
+    const a = artistById(id);
+    if (!a || portraitBusy.has(id)) return false;
+    if (!force && (a.photo || (tried[id] && Date.now() - tried[id] < 14 * 864e5))) return false;
+    portraitBusy.add(id);
+    let found = false;
     try {
-      const url = await wikiThumb(name);
-      let u = '';
-      if (url) { try { u = await squareThumb(url); } catch { u = url; } }
-      portraits[k] = { u, t: Date.now() };
-    } catch { return; } // offline: try again next time
-    finally { portraitBusy.delete(k); }
-    savePortraits();
-    for (const el of $$(`.av[data-artist="${CSS.escape(k)}"]`)) paintAv(el, portraits[k].u);
+      const url = await wikiThumb(artistQuery(a.name));
+      const u = url ? await squareThumb(url).catch(() => '') : '';
+      const cur = artistById(id);
+      if (u && cur && (force || !cur.photo)) { cur.photo = u; cur.src = 'auto'; cur.updated = Date.now(); cur.derived = false; saveArtists(); found = true; }
+      else if (!u) { tried[id] = Date.now(); writeJSON(TRIED_KEY, tried); }
+    } catch { return false; } // offline: try again next time
+    finally { portraitBusy.delete(id); }
+    if (found) for (const el of $$(`.av[data-artist="${CSS.escape(id)}"]`)) paintAv(el, artistById(id).photo);
+    return found;
   }
 
-  /** Look up portraits for artists on screen that we don't know yet (only when portraits are switched on). */
+  /** Find portraits for artists on screen that don't have one yet. */
   async function loadPortraits() {
-    if (prefs.thumbs !== 'portrait' || !navigator.onLine) return;
-    const todo = new Map();
-    for (const el of $$('.av[data-artist]')) {
-      const k = el.dataset.artist, p = portraits[k];
-      if (p && (p.u || p.own || Date.now() - (p.t || 0) < 14 * 864e5)) continue; // known, or looked up recently with no result
-      todo.set(k, el.dataset.aname);
-    }
-    const queue = [...todo];
-    await Promise.all([0, 1, 2].map(async () => { while (queue.length) { const [k, name] = queue.shift(); await fetchPortrait(k, name); } }));
+    if (prefs.pictures === 'key' || !navigator.onLine) return;
+    const ids = [...new Set($$('.av[data-artist]').filter((el) => !el.classList.contains('pic')).map((el) => el.dataset.artist))];
+    await Promise.all([0, 1, 2].map(async () => { while (ids.length) await fetchPortrait(ids.shift()); }));
+  }
+
+  /** Add or edit an artist: name + portrait. Renaming also renames them on their songs. */
+  function openArtistEditor(a, done) {
+    const isNew = !a;
+    const draft = { name: a ? a.name : '', photo: a ? a.photo : '', src: a ? a.src : '' };
+    const uses = a ? songsBy(a).length : 0;
+    const d = modal(`
+      <h2>${isNew ? 'New artist' : 'Edit artist'}</h2>
+      <div class="pbox big">
+        <span class="pthumb lg" id="aThumb"></span>
+        <div class="pbtns col">
+          <button type="button" class="btn soft" id="aPick">${icon('image')}Choose photo</button>
+          <button type="button" class="btn ghost" id="aFind">${icon('search')}Find automatically</button>
+          <button type="button" class="btn ghost" id="aNone">Remove photo</button>
+        </div>
+        <input type="file" id="aFile" accept="image/*" hidden>
+      </div>
+      <div class="fields one"><label class="field">Name<input id="aName" maxlength="120" value="${esc(draft.name)}" placeholder="e.g. Hillsong Worship" autocomplete="off"></label></div>
+      <p class="fine" id="aNote">${isNew ? 'Everyone on the team will be able to pick this artist, with the same photo.' : uses ? `Used by ${uses} song${uses > 1 ? 's' : ''}. A new name is applied to all of them, and your team sees it too.` : 'Not used by any song yet.'}</p>
+      <div class="row" style="justify-content:space-between">
+        ${!isNew && !uses ? '<button type="button" class="btn danger" id="aDel">Delete</button>' : '<span></span>'}
+        <span style="display:flex;gap:8px"><form method="dialog"><button class="btn ghost">Cancel</button></form><button type="button" class="btn primary" id="aSave">Save</button></span>
+      </div>`);
+    const nameIn = $('#aName', d);
+    const paint = () => { $('#aThumb', d).innerHTML = draft.photo ? `<img src="${esc(draft.photo)}" alt="">` : icon('image'); $('#aNone', d).hidden = !draft.photo; };
+    paint();
+    $('#aPick', d).addEventListener('click', () => $('#aFile', d).click());
+    $('#aFile', d).addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try { const url = URL.createObjectURL(file); draft.photo = await squareThumb(url); draft.src = 'own'; URL.revokeObjectURL(url); paint(); }
+      catch (err) { toast(err.message || 'Could not use that photo'); }
+    });
+    $('#aFind', d).addEventListener('click', async (e) => {
+      const name = nameIn.value.trim();
+      if (!name) { nameIn.focus(); toast('Type the artist’s name first'); return; }
+      if (!navigator.onLine) { toast('Needs internet'); return; }
+      const btn = e.currentTarget; btn.disabled = true;
+      try {
+        const url = await wikiThumb(artistQuery(name));
+        if (!url) toast('No picture found for that name. Choose your own photo instead.');
+        else { draft.photo = await squareThumb(url); draft.src = 'auto'; paint(); }
+      } catch { toast('Could not look that up right now'); }
+      btn.disabled = false;
+    });
+    $('#aNone', d).addEventListener('click', () => { draft.photo = ''; draft.src = ''; paint(); });
+    $('#aDel')?.addEventListener('click', () => {
+      if (!confirm(`Delete the artist “${a.name}”?`)) return;
+      artists.splice(artists.indexOf(a), 1);
+      saveArtists(); d.close(); toast('Artist deleted'); done && done(null);
+    });
+    $('#aSave', d).addEventListener('click', () => {
+      const name = nameIn.value.trim().replace(/\s+/g, ' ');
+      if (!name) { nameIn.focus(); toast('Give the artist a name'); return; }
+      const clash = artistByName(name);
+      if (clash && clash !== a) {
+        d.close();
+        toast(`“${clash.name}” is already in your list. Selected it.`);
+        done && done(clash);
+        return;
+      }
+      let out = a;
+      if (isNew) out = newArtist(name, { photo: draft.photo, src: draft.src });
+      else {
+        const was = a.name;
+        if (name !== was) {
+          const stamp = Date.now();
+          for (const sg of songsBy(a)) { sg.artist = name; sg.updated = stamp; }
+          saveLibrary();
+        }
+        Object.assign(a, { name, photo: draft.photo, src: draft.src, updated: Date.now(), derived: false });
+        tried = {}; writeJSON(TRIED_KEY, tried);
+      }
+      saveArtists();
+      d.close();
+      toast('Artist saved');
+      if (isNew && !out.photo) fetchPortrait(out.id).then((ok) => { if (ok) { done && done(out, true); refreshView(); } }); // look for a portrait in the background
+      done && done(out);
+    });
   }
 
   // ---------- reading a photographed page ----------
@@ -2859,41 +3089,36 @@ Jesus is the answer</pre>
       toast('Copy the link of the right video, then paste it here');
     });
 
-    // artist picture
-    const box = $('#portraitBox');
-    const drawPortraitBox = () => {
-      const k = artistKey(f.artist.value);
-      if (!k) { box.innerHTML = ''; return; }
-      const p = portraits[k];
-      box.innerHTML = `<div class="pbox">
-        <span class="pthumb">${p && p.u ? `<img src="${esc(p.u)}" alt="">` : icon('image')}</span>
-        <div class="ptext"><b>Artist picture</b><small>${p && p.own ? 'Your photo' : p && p.u ? 'Found automatically' : portraitBusy.has(k) ? 'Looking…' : 'None yet'}${prefs.thumbs === 'portrait' ? '' : ' · shown when Settings → Song pictures is Artist portrait'}</small></div>
-        <div class="pbtns"><button type="button" class="btn soft" id="pPick">Choose photo</button>${p ? '<button type="button" class="btn ghost" id="pAuto">Find automatically</button>' : '<button type="button" class="btn ghost" id="pAuto">Find</button>'}</div>
-        <input type="file" id="pFile" accept="image/*" hidden></div>`;
-      $('#pPick').addEventListener('click', () => $('#pFile').click());
-      $('#pFile').addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        try {
-          const url = URL.createObjectURL(file);
-          portraits[k] = { u: await squareThumb(url), own: true, t: Date.now() };
-          URL.revokeObjectURL(url);
-          savePortraits(); drawPortraitBox(); toast('Picture saved on this device');
-        } catch (err) { toast(err.message || 'Could not use that photo'); }
-      });
-      $('#pAuto').addEventListener('click', async () => {
-        if (!navigator.onLine) { toast('Needs internet'); return; }
-        delete portraits[k];
-        const run = fetchPortrait(k, artistQuery(f.artist.value));
-        drawPortraitBox();
-        await run;
-        drawPortraitBox();
-        if (!(portraits[k] && portraits[k].u)) toast('No picture found for that name. You can choose your own photo.');
-      });
+    // artist: pick from the list (or add a new one), so the name is always spelled the same way
+    const sel = f.artistSel, box = $('#portraitBox');
+    let lastSel = '';
+    const fillArtistSelect = (pickId) => {
+      const cur = pickId !== undefined ? pickId : (artistByName(f.artist.value) || {}).id || '';
+      sel.innerHTML = `<option value="">No artist</option>${sortedArtists().map((a) => `<option value="${esc(a.id)}"${a.id === cur ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="__new">＋ Add a new artist…</option>`;
+      sel.value = cur || '';
+      lastSel = sel.value;
     };
-    f.artist.addEventListener('change', drawPortraitBox);
-    f.artist.addEventListener('input', () => { clearTimeout(state.pbT); state.pbT = setTimeout(drawPortraitBox, 400); });
-    drawPortraitBox();
+    const drawArtistBox = () => {
+      const a = artistByName(f.artist.value);
+      box.innerHTML = a ? `<div class="pbox"><span class="pthumb">${a.photo ? `<img src="${esc(a.photo)}" alt="">` : icon('image')}</span>
+        <div class="ptext"><b>${esc(a.name)}</b><small>${a.photo ? (a.src === 'own' ? 'Your photo' : 'Portrait found automatically') : 'No portrait yet'}${team ? ' · shared with the team' : ''}</small></div>
+        <div class="pbtns"><button type="button" class="btn soft" id="artEdit">Edit artist</button></div></div>` : '';
+      $('#artEdit')?.addEventListener('click', () => openArtistEditor(a, (out) => { if (out) setArtist(out); else { fillArtistSelect(''); setArtist(null); } }));
+    };
+    const setArtist = (a) => {
+      f.artist.value = a ? a.name : '';
+      fillArtistSelect(a ? a.id : '');
+      f.artist.dispatchEvent(new Event('input'));
+      f.artist.dispatchEvent(new Event('change'));
+      drawArtistBox();
+    };
+    sel.addEventListener('change', () => {
+      if (sel.value === '__new') { sel.value = lastSel; openArtistEditor(null, (out) => { if (out) setArtist(out); }); return; }
+      lastSel = sel.value;
+      setArtist(artistById(sel.value));
+    });
+    fillArtistSelect();
+    drawArtistBox();
   }
 
   /* ================= misc ================= */
@@ -2964,6 +3189,7 @@ Jesus is the answer</pre>
   });
 
   window.addEventListener('hashchange', route);
+  ensureArtists();
   route();
   if (team) startSync();
 

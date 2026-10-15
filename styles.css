@@ -724,3 +724,18 @@ dialog.video-modal { width: min(760px, calc(100vw - 20px)); }
 @keyframes spin { to { transform: rotate(360deg); } }
 dialog.busy-modal { width: min(340px, calc(100vw - 24px)); }
 dialog.busy-modal p { margin: 0; }
+
+/* ============ artists (shared) ============ */
+.pbox.big { padding: 14px; gap: 16px; }
+.pthumb.lg { width: 92px; height: 92px; border-radius: 22px; }
+.pthumb.lg .ic { width: 34px; height: 34px; }
+.pbtns.col { flex-direction: column; align-items: stretch; }
+.pbtns.col .btn { justify-content: flex-start; }
+.art-list { display: grid; gap: 2px; margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.art-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.art-row .pthumb { width: 44px; height: 44px; border-radius: 12px; }
+.art-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.art-name b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.art-name small { color: var(--muted); font-size: 12.5px; }
+#portraitBox:empty { display: none; }
+#portraitBox { margin-top: 8px; }
