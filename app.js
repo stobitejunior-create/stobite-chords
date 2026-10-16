@@ -53,7 +53,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 27; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 28; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1702,7 +1702,7 @@ Jesus is the answer</pre>
     document.title = 'Settings · Stobite Chords';
     const ownKeys = Object.keys(prefs.songKeys || {}).filter(byId).length;
     const seg = (attr, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-${attr}="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div>`;
-    const open = state.setOpen || (state.setOpen = { team: false, appearance: true, preferences: true, library: false }); // the team (and its members) is tucked away until you open it
+    const open = state.setOpen || (state.setOpen = { team: false, appearance: false, preferences: false, library: false }); // everything starts tucked away; open what you need
     const sec = (key, ic, title, summary, body) => `
       <details class="set-sec" data-sec="${key}"${open[key] ? ' open' : ''}>
         <summary><span class="set-ic">${icon(ic)}</span><span class="set-t"><b>${title}</b><small>${summary}</small></span><span class="chev">${icon('chevR')}</span></summary>
