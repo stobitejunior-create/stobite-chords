@@ -38,7 +38,7 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 - Song bar order: Full screen, text size, Transpose, Keys / Bass / Lyrics, then 1 2 3 / do re mi / C D E. Your default view is set in Settings.
 - YouTube link on each song (a Listen button plays it in the app; with no link it searches YouTube for the song).
 - Scan paper: photograph a printed lyric page and it is read into the lyrics box (reading tool downloads the first time). Find lyrics online: type the title and artist and the app offers to pull the lyrics from a free public service (LRCLIB).
-- Artists are shared items (name + portrait you choose). Pick one from a list when adding a song, or add a new one, so names are always spelled the same. With a team they are shared with everyone. Renaming an artist renames them on all their songs. Settings → Artists lists them all.
+- Artists are shared items (name + portrait you choose). Pick one from a list when adding a song, or add a new one, so names are always spelled the same. With a team they are shared with everyone. Renaming an artist renames them on all their songs. The Artists tab lists them all, with their songs.
 - Nothing is lost: deleted songs, setlists and artists go to Settings → Recently deleted and can be restored for the whole team. A device can never delete by itself: only what you delete on purpose is sent. The database keeps a history of every change (supabase/schema.sql update 7).
 - Lost the team code? Settings → Team → Find our team (admin password) lists every team with its code.
 - Delete a song from its page, or tap Select in the library to delete several at once (with Undo).

@@ -52,7 +52,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 25; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 26; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -590,6 +590,7 @@
 
   const NAV = [
     { key: 'songs', href: '#/', icon: 'music', label: 'Songs' },
+    { key: 'artists', href: '#/artists', icon: 'mic', label: 'Artists' },
     { key: 'sets', href: '#/sets', icon: 'list', label: 'Setlists' },
     { key: 'favorites', href: '#/favorites', icon: 'star', label: 'Favorites' },
     { key: 'settings', href: '#/settings', icon: 'sliders', label: 'Settings' },
@@ -597,6 +598,7 @@
 
   function navKey(r) {
     if (r.name === 'songs') return r.fav ? 'favorites' : 'songs';
+    if (r.name === 'artists' || r.name === 'artist') return 'artists';
     if (r.name === 'sets' || r.name === 'set' || (r.name === 'song' && r.setId)) return 'sets';
     if (r.name === 'settings' || r.name === 'language') return 'settings';
     return 'songs';
@@ -604,7 +606,7 @@
 
   function renderNav() {
     const active = navKey(state.route);
-    const counts = { songs: songs.length, sets: setlists.length, favorites: prefs.favs.filter(byId).length };
+    const counts = { songs: songs.length, artists: artists.length, sets: setlists.length, favorites: prefs.favs.filter(byId).length };
     const recentSets = [...setlists].sort(bySetDate).slice(0, 6);
     $('#side').innerHTML = `
       <a class="brand" href="#/"><span class="logo"><img src="icon.svg" alt=""></span><span>Stobite Chords<small>Chord charts for worship</small></span></a>
@@ -632,6 +634,8 @@
     const p = h.replace(/^#\/?/, '').split('/').map((x) => decodeURIComponent(x));
     switch (p[0]) {
       case 'favorites': return { name: 'songs', fav: true };
+      case 'artists': return { name: 'artists' };
+      case 'artist': return { name: 'artist', id: p[1] };
       case 'sets': return { name: 'sets' };
       case 'set': return p[2] != null && p[2] !== '' ? { name: 'song', setId: p[1], index: +p[2] || 0 } : { name: 'set', id: p[1] };
       case 's': return { name: 'song', id: p[1] };
@@ -664,6 +668,8 @@
     if (r.name !== 'songs') { state.selecting = false; state.selected = new Set(); $('#selbar')?.remove(); }
     if (r.name === 'songs') viewSongs(r.fav);
     else if (r.name === 'sets') viewSets();
+    else if (r.name === 'artists') viewArtists();
+    else if (r.name === 'artist') viewArtist(r.id);
     else if (r.name === 'set') viewSet(r.id);
     else if (r.name === 'song') viewSong(r);
     else if (r.name === 'edit') viewEditor(r.id);
@@ -1183,7 +1189,7 @@
       return;
     }
     if (b.dataset.size) { changeSize(+b.dataset.size); if (!inSong) viewSettings(); return; }
-    if (b.dataset.pictures) { prefs.pictures = b.dataset.pictures; savePrefs(); viewSettings(); return; }
+    if (b.dataset.pictures) { prefs.pictures = b.dataset.pictures; savePrefs(); refreshView(); return; }
     if (b.dataset.themeSet) { prefs.theme = b.dataset.themeSet; savePrefs(); applyTheme(); viewSettings(); return; }
     switch (b.dataset.act) {
       case 'import': openImport(); break;
@@ -1611,6 +1617,57 @@ Jesus is the answer</pre>
     });
   }
 
+  /* ================= artists tab ================= */
+  const initials = (n) => (String(n).replace(/\(.*?\)/g, '').match(/[A-Za-z0-9]+/g) || ['?']).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+  const artistPic = (a, cls = '') => `<span class="art-pic ${cls}" style="--h:${hueOf(a.name)}">${a.photo ? `<img src="${esc(a.photo)}" alt="">` : `<i>${esc(initials(a.name))}</i>`}</span>`;
+
+  function viewArtists() {
+    document.title = 'Artists · Stobite Chords';
+    const list = sortedArtists();
+    main.innerHTML = `
+      <header class="topbar">
+        <div class="tb-title"><h1>Artists</h1><p class="sub">${list.length} artist${list.length === 1 ? '' : 's'}${team ? ' · shared with the team' : ''}</p></div>
+        <div class="tb-actions"><button class="btn primary" id="artAdd">${icon('plus')}<span>Add artist</span></button></div>
+      </header>
+      <div class="content">
+        <div class="art-opts">
+          <div class="searchbar sm">${icon('search')}<input type="search" id="artQ" placeholder="Search artists…" autocomplete="off"></div>
+          <div class="seg" role="group" aria-label="Song pictures"><button data-pictures="portrait" aria-pressed="${prefs.pictures !== 'key'}">Show portraits</button><button data-pictures="key" aria-pressed="${prefs.pictures === 'key'}">Show keys</button></div>
+        </div>
+        <div class="art-grid" id="artGrid"></div>
+      </div>`;
+    const add = () => openArtistEditor(null, (out) => { if (out) go('#/artist/' + enc(out.id)); });
+    const draw = () => {
+      const q = normName($('#artQ').value);
+      const shown = list.filter((a) => !q || normName(a.name).includes(q));
+      $('#artGrid').innerHTML = shown.map((a) => {
+        const n = songsBy(a).length;
+        return `<a class="art-tile" href="#/artist/${enc(a.id)}">${artistPic(a)}<b>${esc(a.name)}</b><small>${n} song${n === 1 ? '' : 's'}</small></a>`;
+      }).join('') || emptyState('mic', list.length ? 'No artists found' : 'No artists yet', list.length ? 'Try a different name.' : 'Artists appear when you add a song, or add one now.', list.length ? '' : `<button class="btn primary" id="artAdd2">${icon('plus')}Add artist</button>`);
+      $('#artAdd2')?.addEventListener('click', add);
+    };
+    $('#artAdd').addEventListener('click', add);
+    $('#artQ').addEventListener('input', draw);
+    draw();
+  }
+
+  function viewArtist(id) {
+    const a = artistById(id);
+    if (!a) { go('#/artists'); return; }
+    document.title = `${a.name} · Stobite Chords`;
+    const list = songsBy(a).sort((x, y) => x.title.localeCompare(y.title));
+    main.innerHTML = `
+      <header class="topbar">
+        <a class="btn ghost" href="#/artists">${icon('chevL')}<span>Artists</span></a>
+        <div class="tb-actions"><button class="btn soft" id="artEdit">${icon('edit')}<span>Edit artist</span></button></div>
+      </header>
+      <div class="content">
+        <div class="artist-head">${artistPic(a, 'lg')}<div><h1>${esc(a.name)}</h1><p class="sub">${list.length} song${list.length === 1 ? '' : 's'}${a.photo ? '' : ' · no portrait yet. Tap Edit artist to add one.'}</p></div></div>
+        <div class="song-grid">${list.map((x) => songCard(x, false)).join('') || emptyState('music', 'No songs yet', 'Songs you add with this artist show up here.', '<a class="btn primary" href="#/new">' + icon('plus') + 'New song</a>')}</div>
+      </div>`;
+    $('#artEdit').addEventListener('click', () => openArtistEditor(a, (out) => { if (out) viewArtist(out.id); else go('#/artists'); }));
+  }
+
   /* ================= recently deleted ================= */
   const MARKS = { songs: 'songs', sets: 'sets', artists: 'artists' };
   function recentlyDeletedHTML() {
@@ -1659,15 +1716,6 @@ Jesus is the answer</pre>
             <div class="seg"><button data-size="-2">A−</button><button data-size="2">A+</button></div></div>
         </section>
         ${recentlyDeletedHTML()}
-        <section class="card"><h2>Artists</h2>
-          <div class="srow"><div><b>Song pictures</b><small>Show each artist's portrait on their songs (the key is used when an artist has no portrait). Add photos with Edit.</small></div>
-            ${seg('pictures', prefs.pictures, [['portrait', 'Artist portrait'], ['key', 'Key']])}</div>
-          <div class="art-list">${sortedArtists().map((a) => `
-            <div class="art-row"><span class="pthumb">${a.photo ? `<img src="${esc(a.photo)}" alt="">` : icon('image')}</span>
-              <span class="art-name"><b>${esc(a.name)}</b><small>${songsBy(a).length} song${songsBy(a).length === 1 ? '' : 's'}${team ? ' · shared with the team' : ''}</small></span>
-              <button class="btn ghost" data-art-edit="${esc(a.id)}">Edit</button></div>`).join('') || '<p class="sub" style="padding:8px 0">No artists yet. They appear when you add a song.</p>'}</div>
-          <div class="team-actions" style="margin-top:12px"><button class="btn soft" id="artAdd">${icon('plus')}Add artist</button></div>
-        </section>
         <section class="card"><h2>Charts</h2>
           <div class="srow"><div><b>Chord names</b><small>How chords are written</small></div>
             ${seg('mode', prefs.mode, [['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']])}</div>
@@ -1698,8 +1746,6 @@ Jesus is the answer</pre>
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
     for (const b of $$('[data-restore]')) b.addEventListener('click', () => { restoreTrash(b.dataset.restore, b.dataset.id); viewSettings(); });
-    $('#artAdd')?.addEventListener('click', () => openArtistEditor(null, () => viewSettings()));
-    for (const b of $$('[data-art-edit]')) b.addEventListener('click', () => openArtistEditor(artistById(b.dataset.artEdit), () => viewSettings()));
     $('#scrollSpeed').addEventListener('input', (e) => { prefs.scrollSpeed = +e.target.value; $('#scrollSpeedVal').textContent = e.target.value; });
     $('#scrollSpeed').addEventListener('change', savePrefs);
     $('#myKeySel').addEventListener('change', (e) => {
@@ -2259,6 +2305,8 @@ Jesus is the answer</pre>
     const y = window.scrollY;
     if (r.name === 'songs') viewSongs(r.fav);
     else if (r.name === 'sets') viewSets();
+    else if (r.name === 'artists') viewArtists();
+    else if (r.name === 'artist') viewArtist(r.id);
     else if (r.name === 'set') viewSet(r.id);
     else if (r.name === 'song') viewSong(r);
     else if (r.name === 'settings') viewSettings();
