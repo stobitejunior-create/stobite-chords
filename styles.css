@@ -805,3 +805,9 @@ dialog.busy-modal p { margin: 0; }
 .draft textarea { width: 100%; font: 15px/1.5 ui-monospace, Menlo, monospace; background: var(--surface-2); border: 1px solid transparent; border-radius: 12px; padding: 11px 13px; color: var(--text); resize: vertical; }
 .draft textarea:focus { outline: none; border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 4px var(--primary-soft); }
 .save-bar { position: sticky; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 20px; margin-top: 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lg); z-index: 6; }
+.dthumb-btn { position: relative; border: 0; background: none; padding: 0; cursor: zoom-in; border-radius: 8px; }
+.dthumb-btn span { position: absolute; right: 4px; bottom: 4px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: rgb(12 12 13 / .7); color: #fff; }
+.dthumb-btn span .ic { width: 13px; height: 13px; }
+dialog.photo-modal { width: min(560px, calc(100vw - 16px)); }
+.photo-view { max-height: 70vh; overflow: auto; border-radius: 12px; border: 1px solid var(--line); background: #fff; margin-bottom: 14px; -webkit-overflow-scrolling: touch; }
+.photo-view img { display: block; width: 190%; max-width: none; height: auto; }

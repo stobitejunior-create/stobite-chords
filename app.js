@@ -53,7 +53,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 29; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 30; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -2979,8 +2979,19 @@ Jesus is the answer</pre>
   // ---------- reading a photographed page ----------
   const TESS_JS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 
+  const isHeic = (f) => /heic|heif/i.test(f.type) || /\.(heic|heif)$/i.test(f.name || '');
+  /** iPhone photos (HEIC) can't be opened by every browser: turn them into JPEG first. */
+  async function openableImage(file) {
+    if (!isHeic(file)) return file;
+    try { const bmp = await createImageBitmap(file); bmp.close(); return file; } catch { /* this browser can't open HEIC itself */ }
+    await loadScript('https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js');
+    const out = await window.heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+    return Array.isArray(out) ? out[0] : out;
+  }
+
   /** Photo -> grey, contrast-stretched canvas (much easier for the reader to understand). */
-  function prepPhoto(file) {
+  async function prepPhoto(file0) {
+    const file = await openableImage(file0);
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file), img = new Image();
       img.onload = () => {
@@ -3003,7 +3014,7 @@ Jesus is the answer</pre>
         ctx.putImageData(im, 0, 0);
         resolve(c);
       };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not open that photo')); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not open that photo (try a JPEG or PNG)')); };
       img.src = url;
     });
   }
@@ -3015,6 +3026,17 @@ Jesus is the answer</pre>
     for (const l of lines) { if (!l.trim() && (!out.length || !out[out.length - 1])) continue; out.push(l.trim() ? l : ''); }
     while (out.length && !out[out.length - 1]) out.pop();
     return out.join('\n');
+  }
+
+  /** Read one page: the words, and any handwritten chord numbers over them. */
+  async function readPage(worker, canvas) {
+    const { data } = await worker.recognize(canvas, {}, { blocks: true });
+    const plain = cleanScanned(data.text);
+    try {
+      const page = await chartFromPage(data, canvas, worker);
+      if (page && page.text.replace(/\s/g, '').length >= 12) return { text: page.text, intro: page.intro, chords: page.chords };
+    } catch (err) { console.warn('chart reading failed, using plain text', err); }
+    return { text: plain, intro: '', chords: 0 };
   }
 
   async function scanPaper(file) {
@@ -3029,10 +3051,11 @@ Jesus is the answer</pre>
           else if (/load|initiali/i.test(m.status)) busy.set('Loading the reading tool…');
         },
       });
-      const { data } = await worker.recognize(canvas);
+      const page = await readPage(worker, canvas);
       await worker.terminate();
       busy.close();
-      const text = cleanScanned(data.text);
+      scanPaper.lastIntro = page.intro; scanPaper.lastChords = page.chords;
+      const text = page.text;
       if (text.replace(/\s/g, '').length < 12) { toast('Could not read any words. Try a brighter, flatter, closer photo.'); return null; }
       return text;
     } catch (err) {
@@ -3042,8 +3065,248 @@ Jesus is the answer</pre>
     }
   }
 
+  // ---------- reading handwritten chord numbers on a page ----------
+  // Printed words are read with the text reader; the handwritten numbers above them are found as separate marks
+  // and each one is read by a tiny handwritten-digit network (digit-model.js). Then each number is placed over the word it was written above.
+  function digitNetRun(inp) {
+    const N = window.DIGIT_NET;
+    const conv = (src, C, H, Wd, w, b, OC) => {
+      const out = new Float32Array(OC * H * Wd);
+      for (let oc = 0; oc < OC; oc++) for (let y = 0; y < H; y++) for (let x = 0; x < Wd; x++) {
+        let sum = b[oc];
+        for (let ic = 0; ic < C; ic++) for (let ky = 0; ky < 5; ky++) {
+          const yy = y + ky - 2;
+          if (yy < 0 || yy >= H) continue;
+          for (let kx = 0; kx < 5; kx++) {
+            const xx = x + kx - 2;
+            if (xx < 0 || xx >= Wd) continue;
+            sum += src[(ic * H + yy) * Wd + xx] * w[((oc * C + ic) * 5 + ky) * 5 + kx];
+          }
+        }
+        out[(oc * H + y) * Wd + x] = sum > 0 ? sum : 0;
+      }
+      return out;
+    };
+    const pool = (src, C, H, Wd, k) => {
+      const oh = Math.floor(H / k), ow = Math.floor(Wd / k), out = new Float32Array(C * oh * ow);
+      for (let c = 0; c < C; c++) for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+        let m = -1e9;
+        for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++) { const v = src[(c * H + y * k + dy) * Wd + x * k + dx]; if (v > m) m = v; }
+        out[(c * oh + y) * ow + x] = m;
+      }
+      return out;
+    };
+    let a = conv(inp, 1, 28, 28, N.c1w, N.c1b, 8);
+    a = pool(a, 8, 28, 28, 2);
+    a = conv(a, 8, 14, 14, N.c2w, N.c2b, 16);
+    a = pool(a, 16, 14, 14, 3);
+    const logits = new Float32Array(10);
+    for (let k = 0; k < 10; k++) { let sum = N.fb[k]; for (let i = 0; i < 256; i++) sum += a[i] * N.fw[i * 10 + k]; logits[k] = sum; }
+    const mx = Math.max(...logits), ex = [...logits].map((v) => Math.exp(v - mx)), tot = ex.reduce((p, q) => p + q, 0);
+    return ex.map((v) => v / tot);
+  }
+
+  /** One handwritten mark -> the 28x28 picture the digit network expects (white ink on black, centred). */
+  function markToInput(gray, W, lab, k) {
+    const bw = k.x1 - k.x0 + 1, bh = k.y1 - k.y0 + 1, ids = new Set(k.ids);
+    const t = document.createElement('canvas'); t.width = bw; t.height = bh;
+    const tx = t.getContext('2d'), im = tx.createImageData(bw, bh);
+    for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
+      const gi = (k.y0 + yy) * W + (k.x0 + xx), v = ids.has(lab[gi]) ? Math.max(0, Math.min(255, ((215 - gray[gi * 4]) / 155) * 255)) : 0, o = (yy * bw + xx) * 4;
+      im.data[o] = im.data[o + 1] = im.data[o + 2] = v; im.data[o + 3] = 255;
+    }
+    tx.putImageData(im, 0, 0);
+    const sc = 20 / Math.max(bw, bh), dw = Math.max(1, Math.round(bw * sc)), dh = Math.max(1, Math.round(bh * sc));
+    const s1 = document.createElement('canvas'); s1.width = s1.height = 28;
+    const x1 = s1.getContext('2d', { willReadFrequently: true });
+    x1.fillStyle = '#000'; x1.fillRect(0, 0, 28, 28); x1.imageSmoothingQuality = 'high';
+    x1.drawImage(t, 0, 0, bw, bh, Math.round((28 - dw) / 2), Math.round((28 - dh) / 2), dw, dh);
+    let d = x1.getImageData(0, 0, 28, 28).data, m = 0, cx = 0, cy = 0;
+    for (let y = 0; y < 28; y++) for (let x = 0; x < 28; x++) { const v = d[(y * 28 + x) * 4]; m += v; cx += v * x; cy += v * y; }
+    if (m > 0) { // like the training pictures: put the centre of the ink in the middle
+      const s2 = document.createElement('canvas'); s2.width = s2.height = 28;
+      const x2 = s2.getContext('2d', { willReadFrequently: true });
+      x2.fillStyle = '#000'; x2.fillRect(0, 0, 28, 28);
+      x2.drawImage(s1, Math.round(13.5 - cx / m), Math.round(13.5 - cy / m));
+      d = x2.getImageData(0, 0, 28, 28).data;
+    }
+    const inp = new Float32Array(784);
+    for (let i = 0; i < 784; i++) inp[i] = Math.min(1, (d[i * 4] / 255) * 1.15);
+    return inp;
+  }
+
+  const median = (arr) => { const a = [...arr].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : 0; };
+
+  /** Printed words from a text-reading result: one row per line the reader found. */
+  function rowsFromWords(data) {
+    const lines = data.lines || (data.blocks || []).flatMap((b) => (b.paragraphs || []).flatMap((p) => p.lines || []));
+    const lineWords = lines.map((l) => (l.words || []).map((w) => ({ t: String(w.text || '').trim(), c: w.confidence, b: w.bbox })).filter((w) => w.t && w.b));
+    const isWord = (w) => /[A-Za-z]{2,}/.test(w.t) || (/^[A-Za-z]$/.test(w.t) && w.c >= 70);
+    const printed = lineWords.flat().filter(isWord);
+    if (printed.length < 4) return null;
+    const H = median(printed.filter((w) => w.c >= 90).map((w) => w.b.y1 - w.b.y0)) || median(printed.map((w) => w.b.y1 - w.b.y0));
+    const rows = [];
+    for (const ws of lineWords) {
+      const words = ws.filter((w, i) => {
+        if (isWord(w)) return true;
+        // a capital I at the start of a line is often read as a bar
+        const next = ws[i + 1];
+        if (/^[|Il!]$/.test(w.t) && w.c >= 50 && next && isWord(next) && !ws.slice(0, i).some(isWord) && w.b.y1 - w.b.y0 > 0.6 * H && next.b.x0 - w.b.x1 < 1.4 * H) { w.t = 'I'; return true; }
+        return false;
+      });
+      if (!words.some(isWord)) continue;
+      // a "row" that is one unsure word is handwriting (like the word "Intro"), not print
+      if (words.length === 1 && words[0].c < 60) continue;
+      words.sort((x, y) => x.b.x0 - y.b.x0);
+      const bottom = median(words.map((w) => w.b.y1));
+      rows.push({ words, bottom, x0: words[0].b.x0, x1: words[words.length - 1].b.x1, cy: bottom - 0.55 * H });
+    }
+    if (!rows.length) return null;
+    // a short, unsure row far to the right of where the other lines start is handwriting (like "Intro"), not print
+    const left = median(rows.filter((r) => r.words.length >= 3).map((r) => r.x0));
+    const wide = Math.max(...rows.map((r) => r.x1));
+    for (let i = rows.length - 1; i >= 0 && left; i--) {
+      const r = rows[i], conf = r.words.reduce((t, w) => t + w.c, 0) / r.words.length;
+      if (r.words.length <= 2 && conf < 88 && r.x0 > left + 0.3 * wide) rows.splice(i, 1);
+    }
+    if (!rows.length) return null;
+    rows.sort((x, y) => x.bottom - y.bottom);
+    return { rows, H };
+  }
+
+  /** Everything on the page that is not a printed word: the handwriting. Returns its separate marks. */
+  function findMarks(canvas, rows, H) {
+    const W = canvas.width, HH = canvas.height;
+    const mc = document.createElement('canvas'); mc.width = W; mc.height = HH;
+    const mx = mc.getContext('2d', { willReadFrequently: true });
+    mx.drawImage(canvas, 0, 0);
+    mx.fillStyle = '#fff';
+    for (const r of rows) for (const w of r.words) { const y0 = Math.max(w.b.y0, w.b.y1 - 1.3 * H) - 6; mx.fillRect(w.b.x0 - 8, y0, w.b.x1 - w.b.x0 + 16, w.b.y1 + 8 - y0); }
+    const gray = mx.getImageData(0, 0, W, HH).data;
+    const ink = new Uint8Array(W * HH);
+    for (let i = 0; i < W * HH; i++) ink[i] = gray[i * 4] < 150 ? 1 : 0;
+    const lab = new Int32Array(W * HH), comps = [], stack = new Int32Array(W * HH);
+    for (let st = 0; st < W * HH; st++) {
+      if (!ink[st] || lab[st]) continue;
+      const id = comps.length + 1;
+      let sp = 0, x0 = W, y0 = HH, x1 = 0, y1 = 0, area = 0;
+      stack[sp++] = st; lab[st] = id;
+      while (sp) {
+        const p = stack[--sp], px = p % W, py = (p / W) | 0;
+        area++; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+        for (let dy = -1; dy <= 1; dy++) { const yy = py + dy; if (yy < 0 || yy >= HH) continue; for (let dx = -1; dx <= 1; dx++) { const xx = px + dx; if (xx < 0 || xx >= W) continue; const q = yy * W + xx; if (ink[q] && !lab[q]) { lab[q] = id; stack[sp++] = q; } } }
+      }
+      comps.push({ id, x0, y0, x1, y1, area });
+    }
+    const good = comps.filter((k) => { const w = k.x1 - k.x0 + 1, h = k.y1 - k.y0 + 1; return k.area >= 40 && h >= 0.65 * H && h <= 2.6 * H && w <= 2.2 * h && k.x0 > 0.02 * W && k.x1 < W - 0.03 * W; }).sort((a, b) => a.x0 - b.x0);
+    const marks = []; // the strokes of one digit (a 4 or a 5 is often two strokes) are joined
+    for (const k of good) {
+      const m = marks.find((q) => { const gap = k.x0 - q.x1, vo = Math.min(q.y1, k.y1) - Math.max(q.y0, k.y0); return gap < 0.3 * H && gap > -0.9 * H && vo > 0.4 * Math.min(q.y1 - q.y0, k.y1 - k.y0) && Math.max(q.x1, k.x1) - Math.min(q.x0, k.x0) < 1.9 * H; });
+      if (m) { m.x0 = Math.min(m.x0, k.x0); m.y0 = Math.min(m.y0, k.y0); m.x1 = Math.max(m.x1, k.x1); m.y1 = Math.max(m.y1, k.y1); m.ids.push(k.id); } else marks.push({ ...k, ids: [k.id] });
+    }
+    return { marks, comps, lab, gray, W, HH };
+  }
+
+  /** The photo with all the handwriting wiped out, so the printed words can be read cleanly. */
+  function eraseHandwriting(canvas, found, marksToWipe, rows, H) {
+    const { lab, W, HH } = found;
+    // only what was recognised as a chord number or an arrow (never a printed letter), and only the part above the printed line it sits over
+    const limit = new Map();
+    for (const k of marksToWipe) {
+      const below = rows.filter((r) => r.bottom > k.y1 - 0.5 * H && r.x1 + 1.5 * H > k.x0).sort((x, y) => x.bottom - y.bottom)[0];
+      const lim = below ? below.bottom - 1.05 * H : HH;
+      for (const id of k.ids) limit.set(id, lim);
+    }
+    let e = new Uint8Array(W * HH);
+    for (let y = 0; y < HH; y++) for (let x = 0; x < W; x++) { const l = lab[y * W + x]; if (l && limit.has(l) && y < limit.get(l)) e[y * W + x] = 1; }
+    const grow = (src, horizontal) => { // widen the wiped area by 1 pixel each way (any more eats the printed letters it crosses)
+      const out = new Uint8Array(W * HH);
+      for (let y = 0; y < HH; y++) for (let x = 0; x < W; x++) {
+        if (!src[y * W + x]) continue;
+        for (let d = -1; d <= 1; d++) { const xx = horizontal ? x + d : x, yy = horizontal ? y : y + d; if (xx >= 0 && xx < W && yy >= 0 && yy < HH) out[yy * W + xx] = 1; }
+      }
+      return out;
+    };
+    e = grow(grow(e, true), false);
+    const c = document.createElement('canvas'); c.width = W; c.height = HH;
+    const cx = c.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(canvas, 0, 0);
+    const im = cx.getImageData(0, 0, W, HH);
+    for (let i = 0; i < W * HH; i++) if (e[i]) im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = 255;
+    cx.putImageData(im, 0, 0);
+    return c;
+  }
+
+  /**
+   * The page, read as a chord chart: printed lines with the handwritten chord numbers placed over their words.
+   * Returns { text, intro, chords } or null when the page has no printed words to work with.
+   */
+  async function chartFromPage(data, canvas, worker) {
+    let first = rowsFromWords(data);
+    if (!first) return null;
+    let { rows, H } = first;
+    const found = findMarks(canvas, rows, H);
+    const chords = [], wipe = [];
+    if (found.marks.length) {
+      await loadScript('digit-model.js');
+      for (const k of found.marks) {
+        const w = k.x1 - k.x0 + 1, h = k.y1 - k.y0 + 1;
+        if (w > 1.5 * h) { wipe.push(k); continue; } // arrows and dashes
+        const p = digitNetRun(markToInput(found.gray, found.W, found.lab, k)), best = p.indexOf(Math.max(...p));
+        if (best >= 1 && best <= 7 && p[best] >= 0.8) { chords.push({ d: best, cx: (k.x0 + k.x1) / 2, cy: (k.y0 + k.y1) / 2, h, w, p: Math.round(p[best] * 100) }); wipe.push(k); }
+      }
+    }
+    // handwriting on top of printed words spoils their reading: wipe it out and read the words again
+    if (chords.length >= 3 && worker) {
+      try {
+        const { data: again } = await worker.recognize(eraseHandwriting(canvas, found, wipe, rows, H), {}, { blocks: true });
+        const second = rowsFromWords(again);
+        if (second && second.rows.length >= 0.6 * rows.length) { rows = second.rows; H = second.H; }
+      } catch (err) { console.warn('second reading failed', err); }
+    }
+
+    // put each number over the word below it; numbers that are over no line (the "Intro" note) are kept apart
+    const placed = [], loose = [];
+    const textLeft = Math.min(...rows.map((r) => r.x0)) - 1.2 * H, textRight = Math.max(...rows.map((r) => r.x1)) + 1.4 * H;
+    for (const ch of chords) {
+      let row = null;
+      if (ch.cx >= textLeft && ch.cx <= textRight) {
+        for (const r of rows) {
+          if (r.cy - ch.cy < -0.2 * H || r.cy - ch.cy > 2.1 * H) continue;
+          if (!row || r.cy < row.cy) row = r;
+        }
+      }
+      if (row) {
+        let best = row.words[0], bd = 1e9;
+        for (const w of row.words) { const d = ch.cx < w.b.x0 ? w.b.x0 - ch.cx : ch.cx > w.b.x1 ? ch.cx - w.b.x1 : 0; if (d < bd) { bd = d; best = w; } }
+        (best.chords = best.chords || []).push(ch);
+        placed.push(ch);
+      } else loose.push(ch);
+    }
+    const typical = median(placed.map((c) => c.h)) || H;
+    const kept = loose.filter((c) => c.h >= 0.85 * typical && !loose.some((o) => o !== c && Math.abs(o.cy - c.cy) < 0.9 * H && Math.abs(o.cx - c.cx) < 2.2 * H)); // letters of a handwritten word sit side by side; chord numbers have an arrow or a gap between them
+    loose.length = 0; loose.push(...kept);
+    loose.sort((a, b) => a.cy - b.cy);
+    const introRows = [];
+    for (const ch of loose) { const r = introRows.find((q) => Math.abs(q.cy - ch.cy) < 0.9 * H); if (r) r.list.push(ch); else introRows.push({ cy: ch.cy, list: [ch] }); }
+    const intro = introRows.map((r) => r.list.sort((a, b) => a.cx - b.cx).map((c) => `[${c.d}]`).join(' ')).join('\n');
+    return { text: buildChartText(rows, placed, H), intro, chords: chords.length };
+  }
+
+  /** Rows of words (with their chords) -> chart text: [1]I will [4]exalt You, a blank line between verses. */
+  function buildChartText(rows, placed, H) {
+    const out = [];
+    const gaps = rows.slice(1).map((r, i) => r.bottom - rows[i].bottom);
+    const pitch = median(gaps) || 1.6 * H;
+    rows.forEach((r, i) => {
+      if (i > 0 && r.bottom - rows[i - 1].bottom > 1.45 * pitch) out.push('');
+      out.push(r.words.map((w) => `${(w.chords || []).sort((a, b) => a.cx - b.cx).map((c) => `[${c.d}]`).join('')}${w.t.replace(/^[|]+/, 'I')}`).join(' '));
+    });
+    return out.join('\n');
+  }
+
   // ---------- finding lyrics on the internet ----------
-  const stanzaNorm = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const stanzaNorm = (x) => x.replace(/\[[^\]]*\]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   /** Plain lyrics -> Verse / Chorus sections (a stanza that repeats is called Chorus). Editable afterwards. */
   function structureLyrics(text) {
     const out = [];
@@ -3105,8 +3368,9 @@ Jesus is the answer</pre>
         while (lines.length && !lines[0].trim()) lines.shift();
         f.title.dispatchEvent(new Event('input'));
       }
-      putLyrics(lines.join('\n'));
-      toast('Added from the photo. Check it over for any mistakes, then add the chords.');
+      const body = structureScanned(lines.join('\n').trim());
+      putLyrics((scanPaper.lastIntro ? `Intro\n${scanPaper.lastIntro}\n\n` : '') + body);
+      toast(scanPaper.lastChords ? `Added from the photo with ${scanPaper.lastChords} chords. Check them over.` : 'Added from the photo. Check it over for any mistakes, then add the chords.');
     });
 
     // find lyrics online
@@ -3227,6 +3491,12 @@ Jesus is the answer</pre>
   function structureScanned(text) {
     return text.split('\n').some((l) => l.trim() && SECTION_RE.test(l)) ? text : structureLyrics(text);
   }
+  const bigThumb = (canvas) => { // a larger copy, kept only while you check the draft, so you can compare words and chords with the paper
+    const h = Math.min(canvas.height, 1500), w = Math.round(canvas.width * h / canvas.height);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', 0.7);
+  };
   const miniThumb = (canvas) => {
     const c = document.createElement('canvas'), h = 120, w = Math.max(1, Math.round(canvas.width * h / canvas.height));
     c.width = w; c.height = h;
@@ -3249,7 +3519,7 @@ Jesus is the answer</pre>
           <h2>Your paper folder</h2>
           <p class="sub" style="font-size:14.5px;margin-bottom:14px">Photograph each page: one song per photo, or a long song over a few. Lay it flat in good light with the title at the top. Then choose all the photos at once.</p>
           <button class="btn primary" id="scanPick">${icon('camera')}Choose photos</button>
-          <input type="file" id="scanFiles" accept="image/*" multiple hidden>
+          <input type="file" id="scanFiles" accept="image/*,.heic,.heif" multiple hidden>
           <p class="fine" style="margin-top:14px">The words are read on this device. The photos aren't kept, only the text. The first time it downloads the reading tool, so it needs internet. Printed or neat typed pages work best.</p>
         </section>
         <section class="card" id="scanProg" hidden></section>
@@ -3284,12 +3554,12 @@ Jesus is the answer</pre>
           paintProg(i, files.length, `Page ${i + 1} of ${files.length}`);
           try {
             const canvas = await prepPhoto(f);
-            const { data } = await worker.recognize(canvas);
-            const text = cleanScanned(data.text);
+            const page = await readPage(worker, canvas);
+            const text = page.text;
             if (text.replace(/\s/g, '').length < 12) { row.note = 'no words found'; row.cls = 'bad'; continue; }
             const d = parseDraft(text);
-            drafts.push({ thumb: miniThumb(canvas), title: d.title, first: d.first, artist: '', key: d.key || 'C', merge: !d.title && drafts.length > 0, text: d.text }); // no title on the page: probably the next page of the song above
-            row.note = d.title ? `“${d.title}”` : 'continues the song above'; row.cls = 'ok';
+            drafts.push({ thumb: miniThumb(canvas), big: bigThumb(canvas), title: d.title, first: d.first, artist: '', key: d.key || 'C', merge: !d.title && drafts.length > 0, text: d.text, intro: page.intro || '', chords: page.chords || 0 }); // no title on the page: probably the next page of the song above
+            row.note = (d.title ? `“${d.title}”` : 'continues the song above') + (page.chords ? ` · ${page.chords} chords` : ''); row.cls = 'ok';
           } catch (err) { row.note = 'could not open'; row.cls = 'bad'; }
         }
         paintProg(files.length, files.length, 'Done');
@@ -3317,21 +3587,22 @@ Jesus is the answer</pre>
       rv.innerHTML = `
         <section class="card">
           <h2>Check the songs</h2>
-          <p class="sub" style="font-size:14.5px;margin-bottom:12px">${drafts.length} page${drafts.length === 1 ? '' : 's'} read. Fix any titles, choose the artist and key, and correct mistakes in the words. Chords can be added afterwards: these songs are tagged <b>Needs chords</b>.</p>
+          <p class="sub" style="font-size:14.5px;margin-bottom:12px">${drafts.length} page${drafts.length === 1 ? '' : 's'} read. Fix any titles, choose the artist and key, and correct mistakes in the words. Chord numbers written above the words are read too and shown as [1] [4] before the word they sit over, so check those. Songs added without chords are tagged <b>Needs chords</b>.</p>
           <label class="field">Artist for all of them (optional)<select id="allArtist">${artistOptions('')}</select></label>
         </section>
         ${drafts.map((d, i) => {
           const merged = d.merge && i > 0;
           const dup = !merged && d.title.trim() && songs.some((x) => normName(x.title) === normName(d.title) && (!d.artist || normName(x.artist) === normName(d.artist)));
           return `<section class="card draft" data-i="${i}">
-            <div class="draft-h"><img class="dthumb" src="${d.thumb}" alt=""><b>Page ${i + 1}</b><span style="flex:1"></span><button class="btn ghost icon-only danger" data-d="rm" title="Leave this page out">${icon('x')}</button></div>
+            <div class="draft-h"><button class="dthumb-btn" data-d="zoom" title="Show the whole photo"><img class="dthumb" src="${d.thumb}" alt=""><span>${icon('search')}</span></button><b>Page ${i + 1}</b><span style="flex:1"></span><button class="btn ghost icon-only danger" data-d="rm" title="Leave this page out">${icon('x')}</button></div>
             ${i > 0 ? `<label class="check"><input type="checkbox" data-d="merge"${merged ? ' checked' : ''}> This is the same song as the page above</label>` : ''}
             ${merged ? '' : `<div class="fields" style="margin-top:12px">
               <label class="field full">Title<input data-d="title" value="${esc(d.title)}" placeholder="Song title"></label>
               <label class="field" style="grid-column: span 2">Artist<select data-d="artist">${artistOptions(d.artist)}</select></label>
               <label class="field">Key<select data-d="key">${keyOptions(d.key)}</select></label>
             </div>${dup ? '<p class="warn" style="margin-top:8px">You already have a song with this title.</p>' : ''}`}
-            <label class="field full" style="margin-top:12px">Words<textarea data-d="text" rows="${merged ? 4 : 8}">${esc(d.text)}</textarea></label>
+            ${d.intro && !merged ? `<label class="field full" style="margin-top:12px">Intro chords<textarea data-d="intro" rows="${Math.min(5, d.intro.split('\n').length + 1)}">${esc(d.intro)}</textarea></label>` : ''}
+            <label class="field full" style="margin-top:12px">Words and chords<textarea data-d="text" rows="${merged ? 4 : 8}">${esc(d.text)}</textarea></label>
           </section>`;
         }).join('')}
         <div class="save-bar"><span><b>${songsCount}</b> song${songsCount === 1 ? '' : 's'}</span><button class="btn primary" id="scanSave">${icon('check')}Add to library</button></div>`;
@@ -3341,7 +3612,7 @@ Jesus is the answer</pre>
     const idx = (el) => +el.closest('.draft').dataset.i;
     rv.addEventListener('input', (e) => {
       const el = e.target, f = el.dataset.d;
-      if (f === 'title' || f === 'text') drafts[idx(el)][f] = el.value;
+      if (f === 'title' || f === 'text' || f === 'intro') drafts[idx(el)][f] = el.value;
     });
     rv.addEventListener('change', (e) => {
       const el = e.target;
@@ -3361,13 +3632,15 @@ Jesus is the answer</pre>
       else if (f === 'merge') { d.merge = el.checked; renderReview(); }
     });
     rv.addEventListener('click', (e) => {
+      const zoom = e.target.closest('[data-d="zoom"]');
+      if (zoom) { modal(`<h2>Page ${idx(zoom) + 1}</h2><div class="photo-view"><img src="${drafts[idx(zoom)].big}" alt="The photo of this page"></div><div class="row"><form method="dialog"><button class="btn primary">Close</button></form></div>`, 'photo-modal'); return; }
       const rm = e.target.closest('[data-d="rm"]');
       if (rm) { drafts.splice(idx(rm), 1); if (!drafts.length) { go('#/'); return; } renderReview(); return; }
       if (!e.target.closest('#scanSave')) return;
       const out = [];
       drafts.forEach((d, i) => {
-        if (d.merge && i > 0 && out.length) out[out.length - 1].text += '\n\n' + (d.first ? d.first + '\n' : '') + d.text.trim();
-        else out.push({ title: d.title.trim(), artist: d.artist, key: d.key, text: d.text.trim() });
+        if (d.merge && i > 0 && out.length) out[out.length - 1].chords += d.chords || 0, out[out.length - 1].text += '\n\n' + (d.first ? d.first + '\n' : '') + d.text.trim();
+        else out.push({ title: d.title.trim(), artist: d.artist, key: d.key, text: d.text.trim(), intro: (d.intro || '').trim(), chords: d.chords || 0 });
       });
       const missing = out.findIndex((o) => !o.title);
       if (missing >= 0) {
@@ -3379,12 +3652,12 @@ Jesus is the answer</pre>
       }
       const now = Date.now();
       out.forEach((o, n) => songs.push({
-        id: uid(), title: o.title, artist: o.artist, key: o.key || 'C', tempo: '', time: '4/4', info: '', tags: ['Needs chords'],
-        chart: structureScanned(o.text), updated: now + n,
+        id: uid(), title: o.title, artist: o.artist, key: o.key || 'C', tempo: '', time: '4/4', info: '', tags: o.chords ? [] : ['Needs chords'],
+        chart: (o.intro ? `Intro\n${o.intro}\n\n` : '') + structureScanned(o.text), updated: now + n,
       }));
       ensureArtists();
       saveLibrary();
-      toast(`Added ${out.length} song${out.length === 1 ? '' : 's'}. Open each one to add the chords.`);
+      toast(`Added ${out.length} song${out.length === 1 ? '' : 's'}.${out.some((o) => !o.chords) ? ' Songs without chords are tagged Needs chords.' : ' Open them to check the chords.'}`);
       go('#/');
     });
   }
