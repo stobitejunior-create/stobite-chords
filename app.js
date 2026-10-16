@@ -52,7 +52,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 24; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 25; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1694,7 +1694,7 @@ Jesus is the answer</pre>
         <p class="about"><b>Stobite Chords</b> <span class="ver">version ${APP_VERSION}</span> · ${team ? `Songs are shared with ${esc(team.name)} and kept on this device for offline use.` : 'Your songs stay on this device.'}<br>Keyboard: Space scroll · ←/→ setlist · M metronome · F stage · +/− size</p>
       </div>`;
     $('#snd').addEventListener('click', () => { prefs.metroSound = !prefs.metroSound; savePrefs(); viewSettings(); });
-    $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
+    $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags], updated: Date.now() })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
     for (const b of $$('[data-restore]')) b.addEventListener('click', () => { restoreTrash(b.dataset.restore, b.dataset.id); viewSettings(); });
