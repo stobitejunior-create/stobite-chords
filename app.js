@@ -52,7 +52,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 23; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 24; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -80,6 +80,8 @@
 
   const starterById = Object.fromEntries(STARTER_SONGS.map((s) => [s.id, s]));
   let songs = [], setlists = [], artists = [];
+  let trash = { songs: [], sets: [], artists: [] }; // deleted items, kept in full so they can be restored: { item, at, sent }
+  function trashKey() { return team ? spaceKey('trash') : 'stobite-chords:trash'; }
   function artistsKey() { return team ? spaceKey('artists') : ART_KEY; }
   function loadSpace() {
     songs = readJSON(libKey(), null);
@@ -93,6 +95,21 @@
     if (!synced.artists) synced.artists = {};
     artists = readJSON(artistsKey(), []);
     if (!Array.isArray(artists)) artists = [];
+    trash = readJSON(trashKey(), null) || {};
+    for (const k of ['songs', 'sets', 'artists']) if (!Array.isArray(trash[k])) trash[k] = [];
+  }
+  const saveTrash = () => writeJSON(trashKey(), trash);
+  const trashFind = (kind, id) => trash[kind].find((t) => t.item.id === id);
+  function trashPut(kind, item, sent = false, at = Date.now()) {
+    trash[kind] = trash[kind].filter((t) => t.item.id !== item.id);
+    trash[kind].push({ item: JSON.parse(JSON.stringify(item)), at, sent });
+    if (trash[kind].length > 400) trash[kind] = trash[kind].slice(-400);
+    saveTrash();
+  }
+  function trashTake(kind, id) {
+    const t = trashFind(kind, id);
+    if (t) { trash[kind] = trash[kind].filter((x) => x !== t); saveTrash(); }
+    return t;
   }
   loadSpace();
   const prefs = Object.assign(
@@ -693,6 +710,7 @@
         </div>
       </header>
       <div class="content">
+        ${!team && cloudReady() ? `<a class="warn-bar" href="#/settings">${icon('info')}<span><b>These songs are only on this device.</b> Create or join your team so they're kept safely online.</span></a>` : ''}
         ${!fav && recent.length > 1 ? `<h2 class="h-sm">Jump back in</h2><div class="rail">${recent.map((s) => `
           <a class="rc" href="#/s/${enc(s.id)}" style="--h:${hueOf(s.title)}"><b>${esc(s.title)}</b><span>Key ${esc(prettyKey(s.key))}</span></a>`).join('')}</div>` : ''}
         <div class="searchbar">${icon('search')}<input type="search" id="q" placeholder="Search title, artist or lyrics…" value="${esc(state.query)}" autocomplete="off"></div>
@@ -750,7 +768,6 @@
       ? emptyState('star', 'No favorites yet', 'Tap the star on any song to keep it here for quick access.', '<a class="btn soft" href="#/">Browse songs</a>')
       : emptyState('search', 'No songs found', songs.length ? 'Try a different search or filter.' : 'Add your first song to get started.', '<a class="btn primary" href="#/new">' + icon('plus') + 'New song</a>'));
     drawSelectBar();
-    loadPortraits();
   }
 
   function drawSelectBar() {
@@ -771,6 +788,7 @@
     if (!confirm(team ? `Delete ${what} for everyone in ${team.name}?` : `Delete ${what} from your library?`)) return false;
     const snap = { songs: [...songs], setlists: JSON.parse(JSON.stringify(setlists)), favs: [...prefs.favs], recent: [...prefs.recent] };
     const gone = new Set(ids);
+    for (const sg of list) trashPut('songs', sg); // kept in full, so it can always be restored
     songs = songs.filter((s) => !gone.has(s.id));
     prefs.favs = prefs.favs.filter((x) => !gone.has(x));
     prefs.recent = prefs.recent.filter((x) => !gone.has(x));
@@ -784,6 +802,7 @@
     toast(`Deleted ${what}`, 'Undo', () => {
       songs = snap.songs; setlists = snap.setlists; prefs.favs = snap.favs; prefs.recent = snap.recent;
       const now = Date.now(); // newer than the delete, so teammates get the songs back too
+      for (const id of gone) trashTake('songs', id);
       for (const x of songs) if (gone.has(x.id)) x.updated = now;
       for (const st of setlists) if (st.items.some((i) => gone.has(i.songId))) st.updated = now;
       saveLibrary(); saveSets(); savePrefs(); route();
@@ -888,7 +907,6 @@
       </div>`;
     drawSong();
     $('.hero-av.pic')?.closest('.hero').classList.add('has-pic'); // keep the title clear of a saved portrait
-    loadPortraits();
     requestWake();
     bindSwipe($('#chartCard'));
   }
@@ -1301,8 +1319,9 @@
     $('#shareSet').addEventListener('click', () => openShare(set.items.map((it) => byId(it.songId)).filter(Boolean), `“${set.name}”`, [set]));
     $('#delSet').addEventListener('click', () => {
       if (!confirm(`Delete the setlist “${set.name}”? Your songs stay in the library.`)) return;
+      trashPut('sets', set);
       setlists = setlists.filter((x) => x !== set);
-      saveSets(); toast('Setlist deleted'); go('#/sets');
+      saveSets(); toast('Setlist deleted. You can bring it back in Settings → Recently deleted.'); go('#/sets');
     });
     $('#addSongs').addEventListener('click', () => openPicker(set, drawItems));
 
@@ -1592,6 +1611,34 @@ Jesus is the answer</pre>
     });
   }
 
+  /* ================= recently deleted ================= */
+  const MARKS = { songs: 'songs', sets: 'sets', artists: 'artists' };
+  function recentlyDeletedHTML() {
+    const rows = [];
+    for (const [kind, label] of [['songs', 'Song'], ['sets', 'Setlist'], ['artists', 'Artist']]) {
+      for (const t of trash[kind]) rows.push({ kind, label, t, name: kind === 'sets' ? t.item.name : kind === 'artists' ? t.item.name : t.item.title });
+    }
+    rows.sort((x, y) => y.t.at - x.t.at);
+    if (!rows.length) return '';
+    return `<section class="card"><h2>Recently deleted</h2>
+      <p class="sub" style="margin-bottom:10px">Nothing is ever really gone. Restore brings it back${team ? ' for everyone in the team' : ''}.</p>
+      <div class="art-list">${rows.slice(0, 60).map((r) => `
+        <div class="art-row"><span class="art-name"><b>${esc(r.name || 'Untitled')}</b><small>${r.label} · ${new Date(r.t.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</small></span>
+          <button class="btn soft" data-restore="${r.kind}" data-id="${esc(r.t.item.id)}">Restore</button></div>`).join('')}</div>
+      ${rows.length > 60 ? `<p class="sub">…and ${rows.length - 60} more.</p>` : ''}</section>`;
+  }
+  function restoreTrash(kind, id) {
+    const t = trashTake(kind, id);
+    if (!t) return;
+    const prior = ((synced[MARKS[kind]] || {})[id] || {}).u || 0;
+    const item = { ...JSON.parse(JSON.stringify(t.item)), updated: Math.max(Date.now(), prior + 1) }; // newer than the delete, so the whole team gets it back
+    if (kind === 'songs') { songs.push(item); saveLibrary(); ensureArtists(); }
+    else if (kind === 'sets') { setlists.push(item); saveSets(); }
+    else { delete item.derived; artists.push(item); saveArtists(); }
+    renderNav();
+    toast('Restored');
+  }
+
   /* ================= settings ================= */
   function viewSettings() {
     document.title = 'Settings · Stobite Chords';
@@ -1611,8 +1658,9 @@ Jesus is the answer</pre>
           <div class="srow"><div><b>Text size</b><small>Currently ${prefs.size}px</small></div>
             <div class="seg"><button data-size="-2">A−</button><button data-size="2">A+</button></div></div>
         </section>
+        ${recentlyDeletedHTML()}
         <section class="card"><h2>Artists</h2>
-          <div class="srow"><div><b>Song pictures</b><small>Show each artist's portrait on their songs (the key is used when an artist has no portrait).</small></div>
+          <div class="srow"><div><b>Song pictures</b><small>Show each artist's portrait on their songs (the key is used when an artist has no portrait). Add photos with Edit.</small></div>
             ${seg('pictures', prefs.pictures, [['portrait', 'Artist portrait'], ['key', 'Key']])}</div>
           <div class="art-list">${sortedArtists().map((a) => `
             <div class="art-row"><span class="pthumb">${a.photo ? `<img src="${esc(a.photo)}" alt="">` : icon('image')}</span>
@@ -1649,9 +1697,9 @@ Jesus is the answer</pre>
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags] })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
+    for (const b of $$('[data-restore]')) b.addEventListener('click', () => { restoreTrash(b.dataset.restore, b.dataset.id); viewSettings(); });
     $('#artAdd')?.addEventListener('click', () => openArtistEditor(null, () => viewSettings()));
     for (const b of $$('[data-art-edit]')) b.addEventListener('click', () => openArtistEditor(artistById(b.dataset.artEdit), () => viewSettings()));
-    loadPortraits();
     $('#scrollSpeed').addEventListener('input', (e) => { prefs.scrollSpeed = +e.target.value; $('#scrollSpeedVal').textContent = e.target.value; });
     $('#scrollSpeed').addEventListener('change', savePrefs);
     $('#myKeySel').addEventListener('change', (e) => {
@@ -1960,8 +2008,6 @@ Jesus is the answer</pre>
     items: (st.items || []).map((i) => ({ songId: i.songId, key: i.key || '' })), updated: st.updated || 0, deleted: false,
   });
   const rowToSet = (r) => ({ id: r.id, name: r.name, date: r.date, notes: r.notes, items: Array.isArray(r.items) ? r.items : [], updated: Number(r.updated) || 0 });
-  const blankSong = (id, u) => ({ ...songToRow({ id, title: '' }), updated: u, deleted: true });
-  const blankSet = (id, u) => ({ ...setToRow({ id, name: '' }), updated: u, deleted: true });
 
   /** Merge rows from the server into this device. Newest edit wins. Returns true if anything changed here. */
   const artistToRow = (a) => ({ team_id: team.id, id: a.id, name: (a.name || '').slice(0, 200), photo: a.photo || '', src: a.src || '', updated: a.updated || 0, deleted: false });
@@ -1972,12 +2018,13 @@ Jesus is the answer</pre>
   function applyRemoteArtists(rows) {
     let changed = false;
     for (const r of rows) {
-      const u = Number(r.updated) || 0, mine = artistById(r.id), mark = synced.artists[r.id];
+      const u = Number(r.updated) || 0, mine = artistById(r.id), t = trashFind('artists', r.id);
       if (r.deleted) {
-        if (mine && (mine.updated || 0) <= u) { artists.splice(artists.indexOf(mine), 1); changed = true; }
+        if (mine && (mine.updated || 0) <= u) { trashPut('artists', mine, true, u); artists.splice(artists.indexOf(mine), 1); changed = true; }
         if (!mine || (mine.updated || 0) <= u) synced.artists[r.id] = { u, d: true };
       } else if (!mine) {
-        if (mark && !mark.d && u <= mark.u) continue; // deleted here, not sent yet
+        if (t && !t.sent && u <= (t.at || 0)) continue; // deleted here, not sent yet
+        if (t) trashTake('artists', r.id);
         artists.push(rowToArtist(r)); synced.artists[r.id] = { u, d: false }; changed = true;
       } else if (u > (mine.updated || 0)) {
         Object.assign(mine, rowToArtist(r)); synced.artists[r.id] = { u, d: false }; changed = true;
@@ -2000,24 +2047,22 @@ Jesus is the answer</pre>
   }
 
   async function pushArtists() {
-    if (!team || !sync.client || sync.noArtists) return;
+    if (!team || !sync.client || sync.noArtists || !sync.pulled) return;
     try {
       const now = Date.now();
       const dirty = artists.filter((a) => { const m = synced.artists[a.id]; return !m || m.d || (a.updated || 0) > m.u; });
       const real = dirty.filter((a) => !a.derived).map(artistToRow);
       const soft = dirty.filter((a) => a.derived).map(artistToRow); // made automatically from song names: never overwrite what the team already has
-      for (const [id, m] of Object.entries(synced.artists)) {
-        if (!m.d && !artistById(id)) real.push({ ...artistToRow({ id, name: '', updated: Math.max(now, m.u + 1) }), deleted: true });
-      }
+      for (const t of trash.artists) if (!t.sent) real.push({ ...artistToRow(t.item), updated: Math.max(t.at, ((synced.artists[t.item.id] || {}).u || 0) + 1), deleted: true });
       for (const [list, opts] of [[real, { onConflict: 'team_id,id' }], [soft, { onConflict: 'team_id,id', ignoreDuplicates: true }]]) {
         for (let i = 0; i < list.length; i += 100) {
           const chunk = list.slice(i, i + 100);
           const { error } = await sync.client.from('artists').upsert(chunk, opts);
           if (error) throw error;
-          for (const r of chunk) synced.artists[r.id] = { u: r.updated, d: r.deleted };
+          for (const r of chunk) { synced.artists[r.id] = { u: r.updated, d: r.deleted }; if (r.deleted) { const t = trashFind('artists', r.id); if (t) t.sent = true; } }
         }
       }
-      if (real.length || soft.length) writeJSON(syncedKey(), synced);
+      if (real.length || soft.length) { saveTrash(); writeJSON(syncedKey(), synced); }
     } catch (err) { if (missingArtistsTable(err)) sync.noArtists = true; }
   }
 
@@ -2032,22 +2077,25 @@ Jesus is the answer</pre>
 
   function applyRemote(songRows = [], setRows = []) {
     let changed = false;
-    const merge = (rows, list, marks, toLocal, find) => {
+    const hasWords = (kind, r) => (kind === 'sets' ? !!r.name : !!(r.title || r.chart));
+    const merge = (rows, list, marks, toLocal, find, kind) => {
       for (const r of rows) {
-        const u = Number(r.updated) || 0, mine = find(r.id), mark = marks[r.id];
+        const u = Number(r.updated) || 0, mine = find(r.id), t = trashFind(kind, r.id);
         if (r.deleted) {
-          if (mine && (mine.updated || 0) <= u) { list.splice(list.indexOf(mine), 1); changed = true; }
+          if (mine && (mine.updated || 0) <= u) { trashPut(kind, mine, true, u); list.splice(list.indexOf(mine), 1); changed = true; }
+          else if (!mine && !t && hasWords(kind, r)) { trashPut(kind, toLocal(r), true, u); } // keep it so it can be restored on this device too
           if (!mine || (mine.updated || 0) <= u) marks[r.id] = { u, d: true };
         } else if (!mine) {
-          if (mark && !mark.d && u <= mark.u) continue; // deleted here, not yet sent
+          if (t && !t.sent && u <= (t.at || 0)) continue; // deleted on this device and not sent yet: keep it deleted
+          if (t) trashTake(kind, r.id); // someone restored it
           list.push(toLocal(r)); marks[r.id] = { u, d: false }; changed = true;
         } else if (u > (mine.updated || 0)) {
           Object.assign(mine, toLocal(r)); marks[r.id] = { u, d: false }; changed = true;
         } else if (u === (mine.updated || 0)) marks[r.id] = { u, d: false };
       }
     };
-    merge(songRows, songs, synced.songs, rowToSong, byId);
-    merge(setRows, setlists, synced.sets, rowToSet, setById);
+    merge(songRows, songs, synced.songs, rowToSong, byId, 'songs');
+    merge(setRows, setlists, synced.sets, rowToSet, setById, 'sets');
     if (changed) { writeJSON(libKey(), songs); writeJSON(setKey(), setlists); ensureArtists(); }
     writeJSON(syncedKey(), synced);
     return changed;
@@ -2066,11 +2114,12 @@ Jesus is the answer</pre>
   async function pullAll() {
     const [songRows, setRows] = await Promise.all([fetchAll('songs'), fetchAll('setlists')]);
     if (applyRemote(songRows, setRows)) refreshView();
+    sync.pulled = true;
   }
 
   /** Send everything that changed on this device since the last sync. */
   async function pushDirty() {
-    if (!team || !sync.client) return;
+    if (!team || !sync.client || !sync.pulled) return; // never send anything before this device has first received what the team already has
     if (sync.pushing) { sync.again = true; return; }
     sync.pushing = true;
     try {
@@ -2078,9 +2127,10 @@ Jesus is the answer</pre>
         sync.again = false;
         const now = Date.now();
         const songRows = songs.filter((x) => { const m = synced.songs[x.id]; return !m || m.d || (x.updated || 0) > m.u; }).map(songToRow);
-        for (const [id, m] of Object.entries(synced.songs)) if (!m.d && !byId(id)) songRows.push(blankSong(id, Math.max(now, m.u + 1)));
+        // Deletions: ONLY what you deleted on purpose, sent with all its words (a missing song is never read as a deletion).
+        for (const t of trash.songs) if (!t.sent) songRows.push({ ...songToRow(t.item), updated: Math.max(t.at, ((synced.songs[t.item.id] || {}).u || 0) + 1), deleted: true });
         const setRows = setlists.filter((x) => { const m = synced.sets[x.id]; return !m || m.d || (x.updated || 0) > m.u; }).map(setToRow);
-        for (const [id, m] of Object.entries(synced.sets)) if (!m.d && !setById(id)) setRows.push(blankSet(id, Math.max(now, m.u + 1)));
+        for (const t of trash.sets) if (!t.sent) setRows.push({ ...setToRow(t.item), updated: Math.max(t.at, ((synced.sets[t.item.id] || {}).u || 0) + 1), deleted: true });
         if (!songRows.length && !setRows.length) break;
         setSync('syncing');
         for (const [table, rows, marks] of [['songs', songRows, synced.songs], ['setlists', setRows, synced.sets]]) {
@@ -2094,9 +2144,13 @@ Jesus is the answer</pre>
               ({ error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' }));
             }
             if (error) throw error;
-            for (const r of chunk) marks[r.id] = { u: r.updated, d: r.deleted };
+            for (const r of chunk) {
+              marks[r.id] = { u: r.updated, d: r.deleted };
+              if (r.deleted) { const t = trashFind(table === 'songs' ? 'songs' : 'sets', r.id); if (t) t.sent = true; }
+            }
           }
         }
+        saveTrash();
         writeJSON(syncedKey(), synced);
       } while (sync.again);
       await pushArtists();
@@ -2217,6 +2271,7 @@ Jesus is the answer</pre>
     if (sync.channel && sync.client) { sync.client.removeChannel(sync.channel); sync.channel = null; }
     if (sync.artChannel && sync.client) { sync.client.removeChannel(sync.artChannel); sync.artChannel = null; }
     sync.noArtists = false;
+    sync.pulled = false;
     team = t;
     if (team) {
       writeJSON(TEAM_KEY, team);
@@ -2319,7 +2374,7 @@ Jesus is the answer</pre>
       try {
         if (sync.client && sync.userId) await sync.client.from('team_members').delete().eq('team_id', old.id).eq('user_id', sync.userId);
       } catch { /* offline: leaving locally is still fine */ }
-      for (const k of ['songs', 'setlists', 'artists', 'synced']) { try { localStorage.removeItem(`stobite-chords:team:${old.id}:${k}`); } catch { /* ignore */ } }
+      for (const k of ['songs', 'setlists', 'artists', 'trash', 'synced']) { try { localStorage.removeItem(`stobite-chords:team:${old.id}:${k}`); } catch { /* ignore */ } }
       enterTeam(null);
       if (x === 'keep') mergeAll({ songs: teamSongs, setlists: teamSets });
       d.close();
@@ -2340,6 +2395,7 @@ Jesus is the answer</pre>
           <div><b>Share one library with your band</b><small>Everyone sees the same songs and setlists, and edits show up on every phone straight away.</small></div>
         </div>
         <div class="team-actions"><button class="btn primary" id="tCreate">${icon('plus')}Create a team</button><button class="btn" id="tJoin">${icon('users')}Join a team</button></div>
+        <p class="team-note">Lost the code? <button class="link" id="tFind">Find our team</button> (needs the admin password).</p>
       </section>`;
     }
     const leader = team.role === 'leader';
@@ -2373,6 +2429,7 @@ Jesus is the answer</pre>
   function bindTeamCard() {
     $('#tCreate')?.addEventListener('click', openCreateTeam);
     $('#tJoin')?.addEventListener('click', () => openJoinTeam());
+    $('#tFind')?.addEventListener('click', recoverTeam);
     $('#tLeave')?.addEventListener('click', openLeaveTeam);
     $('#tSync')?.addEventListener('click', () => startSync());
     $('#tClaim')?.addEventListener('click', claimLeader);
@@ -2484,6 +2541,36 @@ Jesus is the answer</pre>
     askAdminPassword('Chord language', 'Only the music director can change how chords are named.', () => {
       try { sessionStorage.setItem('stobite-chords:lang-unlocked', '1'); } catch { /* ignore */ }
       go('#/language');
+    });
+  }
+
+  /** If nobody has the team code any more: the music director can list every team (name + code) and jump back in. */
+  function recoverTeam() {
+    askAdminPassword('Find our team', 'For the music director. Lists every team in the database, with its code, so you can jump back in.', async (pw) => {
+      const { data, error } = await sync.client.rpc('admin_list_teams', { pw });
+      if (error) { toast(/admin_list_teams|function/i.test(error.message) ? 'The database needs its latest update first' : error.message); return; }
+      if (!data || !data.length) { toast('No teams found in the database'); return; }
+      const d = modal(`
+        <h2>Your teams</h2>
+        <p>Tap the one to rejoin. You'll be the leader.</p>
+        <div class="fields one"><label class="field">Your name<input id="rtMe" maxlength="60" value="${esc(prefs.myName || '')}" placeholder="How the team sees you"></label></div>
+        <div class="pick-list">${data.map((t, i) => `
+          <button class="result" data-i="${i}"><b>${esc(t.team_name)}</b><span>Code ${esc(prettyCode(t.code))} · ${t.songs} song${t.songs == 1 ? '' : 's'} · ${t.members} member${t.members == 1 ? '' : 's'}</span></button>`).join('')}</div>
+        <div class="row"><form method="dialog"><button class="btn ghost">Close</button></form></div>`);
+      d.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-i]');
+        if (!b) return;
+        const me = $('#rtMe', d).value.trim();
+        if (!me) { toast('Add your name first'); $('#rtMe', d).focus(); return; }
+        const t = data[+b.dataset.i];
+        const { data: r, error: err } = await sync.client.rpc('admin_join_team', { t: t.team_id, pw, my_name: me });
+        if (err) { toast(err.message); return; }
+        prefs.myName = me; savePrefs();
+        d.close();
+        enterTeam({ id: r.id, name: r.name, code: r.join_code, role: 'leader', myName: me }, undefined, undefined, undefined);
+        toast(`Back in ${r.name}`);
+        go('#/');
+      });
     });
   }
 
@@ -2667,7 +2754,6 @@ Jesus is the answer</pre>
   }
 
   // ---------- artists: shared items with a name and a portrait ----------
-  const TRIED_KEY = 'stobite-chords:portrait-tried';
   const OLD_PORT_KEY = 'stobite-chords:portraits'; // before artists were shared
   const normName = (n) => String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const artistById = (id) => artists.find((x) => x.id === id);
@@ -2746,36 +2832,6 @@ Jesus is the answer</pre>
     if (el.classList.contains('hero-av')) el.closest('.hero')?.classList.add('has-pic');
   }
 
-  const PERSON_RE = /(singer|songwriter|musician|vocalist|\bband\b|musical group|composer|pastor|preacher|clergy|hymn|worship|gospel|poet|choir|\bduo\b|\btrio\b|rapper|minister|evangelist|bishop|priest|organist|pianist|guitarist|recording artist|record producer)/i;
-  const GENERIC_ARTIST = /^(irish|traditional|trad|anonymous|unknown|various|folk|spiritual|african american spiritual|public domain|church|hymn|scottish|welsh|english|german|latin)$/i;
-  async function wikiThumb(name) {
-    if (GENERIC_ARTIST.test(name.trim())) return null; // "Irish", "Traditional"… are not a person
-    const summary = async (title) => {
-      const r = await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + enc(title.replace(/ /g, '_')) + '?redirect=true');
-      if (r.status === 429 || r.status >= 500) throw new Error('busy'); // not "no such person": try again later
-      if (!r.ok) return null;
-      const d = await r.json();
-      if (d.type !== 'standard' || !PERSON_RE.test(`${d.description || ''} ${(d.extract || '').slice(0, 240)}`)) return null; // right kind of page only
-      return d.thumbnail ? d.thumbnail.source : null;
-    };
-    let url = await summary(name);
-    if (!url) {
-      const words = name.toLowerCase().split(/\s+/).filter((w) => w.length > 2 && !w.endsWith('.')); // initials like "B." never match a full page title
-      for (const q of [name, `${name} hymn writer`, `${name} singer OR band OR musician`]) {
-        const r = await fetch('https://en.wikipedia.org/w/api.php?action=query&list=search&srlimit=4&format=json&origin=*&srsearch=' + enc(q));
-        const d = r.ok ? await r.json() : null;
-        for (const hit of (d && d.query && d.query.search) || []) {
-          const t = hit.title.toLowerCase();
-          if (!words.every((w) => t.includes(w))) continue; // the page must really be about this name
-          url = await summary(hit.title);
-          if (url) break;
-        }
-        if (url) break;
-      }
-    }
-    return url;
-  }
-
   /** Any image (file or URL) -> a small square JPEG data URL, so it is light and works offline. */
   function squareThumb(src, size = 160) {
     return new Promise((resolve, reject) => {
@@ -2794,34 +2850,6 @@ Jesus is the answer</pre>
     });
   }
 
-  let tried = readJSON(TRIED_KEY, {}); // artists we searched for and found nothing (this device only, retry after 2 weeks)
-  const portraitBusy = new Set();
-  /** Look an artist up on Wikipedia and keep the portrait on the artist (so the whole team gets it). */
-  async function fetchPortrait(id, force = false) {
-    const a = artistById(id);
-    if (!a || portraitBusy.has(id)) return false;
-    if (!force && (a.photo || (tried[id] && Date.now() - tried[id] < 14 * 864e5))) return false;
-    portraitBusy.add(id);
-    let found = false;
-    try {
-      const url = await wikiThumb(artistQuery(a.name));
-      const u = url ? await squareThumb(url).catch(() => '') : '';
-      const cur = artistById(id);
-      if (u && cur && (force || !cur.photo)) { cur.photo = u; cur.src = 'auto'; cur.updated = Date.now(); cur.derived = false; saveArtists(); found = true; }
-      else if (!u) { tried[id] = Date.now(); writeJSON(TRIED_KEY, tried); }
-    } catch { return false; } // offline: try again next time
-    finally { portraitBusy.delete(id); }
-    if (found) for (const el of $$(`.av[data-artist="${CSS.escape(id)}"]`)) paintAv(el, artistById(id).photo);
-    return found;
-  }
-
-  /** Find portraits for artists on screen that don't have one yet. */
-  async function loadPortraits() {
-    if (prefs.pictures === 'key' || !navigator.onLine) return;
-    const ids = [...new Set($$('.av[data-artist]').filter((el) => !el.classList.contains('pic')).map((el) => el.dataset.artist))];
-    await Promise.all([0, 1, 2].map(async () => { while (ids.length) await fetchPortrait(ids.shift()); }));
-  }
-
   /** Add or edit an artist: name + portrait. Renaming also renames them on their songs. */
   function openArtistEditor(a, done) {
     const isNew = !a;
@@ -2833,7 +2861,6 @@ Jesus is the answer</pre>
         <span class="pthumb lg" id="aThumb"></span>
         <div class="pbtns col">
           <button type="button" class="btn soft" id="aPick">${icon('image')}Choose photo</button>
-          <button type="button" class="btn ghost" id="aFind">${icon('search')}Find automatically</button>
           <button type="button" class="btn ghost" id="aNone">Remove photo</button>
         </div>
         <input type="file" id="aFile" accept="image/*" hidden>
@@ -2854,21 +2881,10 @@ Jesus is the answer</pre>
       try { const url = URL.createObjectURL(file); draft.photo = await squareThumb(url); draft.src = 'own'; URL.revokeObjectURL(url); paint(); }
       catch (err) { toast(err.message || 'Could not use that photo'); }
     });
-    $('#aFind', d).addEventListener('click', async (e) => {
-      const name = nameIn.value.trim();
-      if (!name) { nameIn.focus(); toast('Type the artist’s name first'); return; }
-      if (!navigator.onLine) { toast('Needs internet'); return; }
-      const btn = e.currentTarget; btn.disabled = true;
-      try {
-        const url = await wikiThumb(artistQuery(name));
-        if (!url) toast('No picture found for that name. Choose your own photo instead.');
-        else { draft.photo = await squareThumb(url); draft.src = 'auto'; paint(); }
-      } catch { toast('Could not look that up right now'); }
-      btn.disabled = false;
-    });
     $('#aNone', d).addEventListener('click', () => { draft.photo = ''; draft.src = ''; paint(); });
     $('#aDel')?.addEventListener('click', () => {
       if (!confirm(`Delete the artist “${a.name}”?`)) return;
+      trashPut('artists', a);
       artists.splice(artists.indexOf(a), 1);
       saveArtists(); d.close(); toast('Artist deleted'); done && done(null);
     });
@@ -2892,12 +2908,10 @@ Jesus is the answer</pre>
           saveLibrary();
         }
         Object.assign(a, { name, photo: draft.photo, src: draft.src, updated: Date.now(), derived: false });
-        tried = {}; writeJSON(TRIED_KEY, tried);
       }
       saveArtists();
       d.close();
       toast('Artist saved');
-      if (isNew && !out.photo) fetchPortrait(out.id).then((ok) => { if (ok) { done && done(out, true); refreshView(); } }); // look for a portrait in the background
       done && done(out);
     });
   }
