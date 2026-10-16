@@ -791,3 +791,17 @@ dialog.busy-modal p { margin: 0; }
 .set-body .team-card { padding-top: 14px; }
 .rd { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .rd h3 { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
+
+/* ============ batch scan ============ */
+.bar { height: 10px; border-radius: 999px; background: var(--primary-soft); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--grad); border-radius: 999px; transition: width .3s; }
+.prog-list { list-style: none; margin: 12px 0 0; padding: 0; max-height: 36vh; overflow: auto; font-size: 13.5px; }
+.prog-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.prog-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.prog-list em { font-style: normal; font-weight: 700; flex: none; color: var(--muted); }
+.prog-list .ok em { color: #16a34a; } .prog-list .bad em { color: var(--danger); } .prog-list .now em { color: var(--primary); }
+.draft-h { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.dthumb { height: 56px; width: auto; max-width: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.draft textarea { width: 100%; font: 15px/1.5 ui-monospace, Menlo, monospace; background: var(--surface-2); border: 1px solid transparent; border-radius: 12px; padding: 11px 13px; color: var(--text); resize: vertical; }
+.draft textarea:focus { outline: none; border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 4px var(--primary-soft); }
+.save-bar { position: sticky; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 20px; margin-top: 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lg); z-index: 6; }

@@ -53,7 +53,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 28; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 29; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -638,6 +638,7 @@
     const p = h.replace(/^#\/?/, '').split('/').map((x) => decodeURIComponent(x));
     switch (p[0]) {
       case 'favorites': return { name: 'songs', fav: true };
+      case 'scan': return { name: 'scan' };
       case 'artists': return { name: 'artists' };
       case 'artist': return { name: 'artist', id: p[1] };
       case 'sets': return { name: 'sets' };
@@ -666,7 +667,7 @@
     stopScroll(true);
     toggleMetro(false);
     if (r.name !== 'song') { exitStage(); releaseWake(); }
-    document.body.classList.toggle('focus', r.name === 'song' || r.name === 'edit');
+    document.body.classList.toggle('focus', r.name === 'song' || r.name === 'edit' || r.name === 'scan');
     document.body.classList.remove('bass', 'lyrics');
     renderNav();
     if (r.name !== 'songs') { state.selecting = false; state.selected = new Set(); $('#selbar')?.remove(); }
@@ -676,6 +677,7 @@
     else if (r.name === 'artist') viewArtist(r.id);
     else if (r.name === 'set') viewSet(r.id);
     else if (r.name === 'song') viewSong(r);
+    else if (r.name === 'scan') viewScan();
     else if (r.name === 'edit') viewEditor(r.id);
     else if (r.name === 'settings') viewSettings();
     else if (r.name === 'language') viewLanguage();
@@ -1478,6 +1480,7 @@
             <div class="get-lyrics">
               <button type="button" class="btn soft" id="scanBtn">${icon('camera')}Scan paper</button>
               <button type="button" class="btn soft" id="findBtn">${icon('globe')}Find lyrics online</button>
+              <a class="btn ghost" href="#/scan">${icon('file')}Scan many pages</a>
               <input type="file" id="scanFile" accept="image/*" hidden>
             </div>
             <div class="offer" id="lyricsOffer" hidden></div>
@@ -1739,6 +1742,8 @@ Jesus is the answer</pre>
         ${sec('library', 'file', 'Library', `${songs.length} song${songs.length === 1 ? '' : 's'} · ${setlists.length} setlist${setlists.length === 1 ? '' : 's'}`, `
           <div class="srow"><div><b>Share or back up</b><small>${songs.length} songs and ${setlists.length} setlists as one file</small></div>
             <button class="btn soft" data-act="share-lib">${icon('share')}Share library</button></div>
+          <div class="srow"><div><b>Scan your paper folder</b><small>Photograph many pages at once and turn them into songs</small></div>
+            <a class="btn soft" href="#/scan">${icon('camera')}Scan pages</a></div>
           <div class="srow"><div><b>Import</b><small>Add songs someone shared with you</small></div>
             <button class="btn" data-act="import">${icon('download')}Import</button></div>
           <div class="srow"><div><b>Starter hymns</b><small>Put back any of the included hymns you deleted</small></div>
@@ -3186,6 +3191,202 @@ Jesus is the answer</pre>
     });
     fillArtistSelect();
     drawArtistBox();
+  }
+
+  /* ================= scan a whole folder of pages ================= */
+  const KEY_ALIASES = { Db: 'C#', 'D#': 'Eb', Gb: 'F#', 'G#': 'Ab', 'A#': 'Bb', 'C#': 'C#', Eb: 'Eb', 'F#': 'F#', Ab: 'Ab', Bb: 'Bb' };
+  /** "Key of G", "Key: Bb" … -> one of our keys, else ''. */
+  function keyFromText(text) {
+    const m = /\bkey\s*(?:of|[:=-])?\s*([A-G][#b♭♯]?)(?![a-z])/i.exec(text);
+    if (!m) return '';
+    const k = m[1][0].toUpperCase() + m[1].slice(1).replace('♭', 'b').replace('♯', '#');
+    const mapped = KEY_ALIASES[k] || k;
+    return KEYS.includes(mapped) ? mapped : '';
+  }
+  /** Photos of widely spaced lines make a blank line after every line: if so, close the gaps. */
+  function squeezeBlanks(text) {
+    const groups = text.split(/\n{2,}/).map((g) => g.trim()).filter(Boolean);
+    const lines = text.split('\n').filter((l) => l.trim());
+    return groups.length >= 3 && lines.length / groups.length < 2.2 ? lines.join('\n') : text;
+  }
+  /** Page text -> { title, first, text, key }: a short first line is normally the title; a long one means the page continues a song. */
+  function parseDraft(text) {
+    const key = keyFromText(text);
+    let lines = String(text).split('\n').filter((l) => !/^\s*key\s*(?:of|[:=-])?\s*[A-G][#b♭♯]?m?\s*$/i.test(l));
+    let title = '', first = '';
+    while (lines.length && !lines[0].trim()) lines.shift();
+    const head = lines.length ? lines[0].trim() : '';
+    if (lines.length > 3 && head.length > 1 && head.length < 40 && !/[,;:]$/.test(head) && !isChordLine(lines[0])) {
+      first = lines.shift().trim();
+      title = first.replace(/^[#*\-–—•\d.)\s]+/, '').replace(/[:;,\s]+$/, '');
+      while (lines.length && !lines[0].trim()) lines.shift();
+    }
+    return { title, first, text: squeezeBlanks(lines.join('\n').trim()), key };
+  }
+  /** Keep headings the page already has; otherwise label the stanzas (a repeated stanza is the Chorus). */
+  function structureScanned(text) {
+    return text.split('\n').some((l) => l.trim() && SECTION_RE.test(l)) ? text : structureLyrics(text);
+  }
+  const miniThumb = (canvas) => {
+    const c = document.createElement('canvas'), h = 120, w = Math.max(1, Math.round(canvas.width * h / canvas.height));
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', 0.6);
+  };
+
+  function viewScan() {
+    document.title = 'Scan pages · Stobite Chords';
+    let drafts = [];
+    const mine = () => state.route && state.route.name === 'scan';
+    main.innerHTML = `
+      <header class="topbar lined">
+        <a class="btn ghost" href="#/">${icon('x')}<span>Cancel</span></a>
+        <div class="tb-title" style="text-align:center"><b>Scan pages</b></div>
+        <div class="tb-actions"><span style="width:40px"></span></div>
+      </header>
+      <div class="content narrow" style="padding-top:16px">
+        <section class="card" id="scanStart">
+          <h2>Your paper folder</h2>
+          <p class="sub" style="font-size:14.5px;margin-bottom:14px">Photograph each page: one song per photo, or a long song over a few. Lay it flat in good light with the title at the top. Then choose all the photos at once.</p>
+          <button class="btn primary" id="scanPick">${icon('camera')}Choose photos</button>
+          <input type="file" id="scanFiles" accept="image/*" multiple hidden>
+          <p class="fine" style="margin-top:14px">The words are read on this device. The photos aren't kept, only the text. The first time it downloads the reading tool, so it needs internet. Printed or neat typed pages work best.</p>
+        </section>
+        <section class="card" id="scanProg" hidden></section>
+        <div id="scanReview" hidden></div>
+      </div>`;
+
+    const lines = [];
+    const paintProg = (done, total, label) => {
+      $('#scanProg').hidden = false;
+      $('#scanProg').innerHTML = `<h2>Reading your pages</h2>
+        <div class="bar"><i style="width:${Math.round((done / total) * 100)}%"></i></div>
+        <p class="sub" style="margin:10px 0 0;font-size:14.5px"><b>${esc(label)}</b><br>Keep this screen open. Each page takes a few seconds.</p>
+        <ul class="prog-list">${lines.map((l) => `<li class="${l.cls}"><span>${esc(l.name)}</span><em>${esc(l.note)}</em></li>`).join('')}</ul>`;
+    };
+
+    $('#scanPick').addEventListener('click', () => $('#scanFiles').click());
+    $('#scanFiles').addEventListener('change', async (e) => {
+      const files = [...e.target.files].filter((f) => /^image\//.test(f.type) || /\.(jpe?g|png|heic|heif|webp)$/i.test(f.name));
+      e.target.value = '';
+      if (!files.length) return;
+      $('#scanStart').hidden = true;
+      requestWake();
+      let worker;
+      try {
+        paintProg(0, files.length, 'Loading the reading tool…');
+        await loadScript(TESS_JS);
+        worker = await window.Tesseract.createWorker('eng', 1);
+        for (let i = 0; i < files.length; i++) {
+          if (!mine()) break;
+          const f = files[i], row = { name: f.name || `Page ${i + 1}`, note: 'reading…', cls: 'now' };
+          lines.push(row);
+          paintProg(i, files.length, `Page ${i + 1} of ${files.length}`);
+          try {
+            const canvas = await prepPhoto(f);
+            const { data } = await worker.recognize(canvas);
+            const text = cleanScanned(data.text);
+            if (text.replace(/\s/g, '').length < 12) { row.note = 'no words found'; row.cls = 'bad'; continue; }
+            const d = parseDraft(text);
+            drafts.push({ thumb: miniThumb(canvas), title: d.title, first: d.first, artist: '', key: d.key || 'C', merge: !d.title && drafts.length > 0, text: d.text }); // no title on the page: probably the next page of the song above
+            row.note = d.title ? `“${d.title}”` : 'continues the song above'; row.cls = 'ok';
+          } catch (err) { row.note = 'could not open'; row.cls = 'bad'; }
+        }
+        paintProg(files.length, files.length, 'Done');
+      } catch (err) {
+        toast(navigator.onLine ? 'Could not start reading: ' + (err.message || err) : 'The first scan needs internet');
+        $('#scanStart').hidden = false; $('#scanProg').hidden = true;
+        return;
+      } finally {
+        try { worker && await worker.terminate(); } catch { /* ignore */ }
+        releaseWake();
+      }
+      if (!mine()) return;
+      if (!drafts.length) { toast('No words could be read. Try brighter, flatter, closer photos.'); $('#scanStart').hidden = false; $('#scanProg').hidden = true; return; }
+      $('#scanProg').hidden = true;
+      renderReview();
+    });
+
+    const artistOptions = (cur) => `<option value="">No artist</option>${sortedArtists().map((a) => `<option value="${esc(a.name)}"${normName(a.name) === normName(cur) ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="__new">＋ Add a new artist…</option>`;
+    const keyOptions = (cur) => KEYS.map((k) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('');
+
+    function renderReview() {
+      const rv = $('#scanReview');
+      rv.hidden = false;
+      const songsCount = drafts.filter((d, i) => !(d.merge && i > 0)).length;
+      rv.innerHTML = `
+        <section class="card">
+          <h2>Check the songs</h2>
+          <p class="sub" style="font-size:14.5px;margin-bottom:12px">${drafts.length} page${drafts.length === 1 ? '' : 's'} read. Fix any titles, choose the artist and key, and correct mistakes in the words. Chords can be added afterwards: these songs are tagged <b>Needs chords</b>.</p>
+          <label class="field">Artist for all of them (optional)<select id="allArtist">${artistOptions('')}</select></label>
+        </section>
+        ${drafts.map((d, i) => {
+          const merged = d.merge && i > 0;
+          const dup = !merged && d.title.trim() && songs.some((x) => normName(x.title) === normName(d.title) && (!d.artist || normName(x.artist) === normName(d.artist)));
+          return `<section class="card draft" data-i="${i}">
+            <div class="draft-h"><img class="dthumb" src="${d.thumb}" alt=""><b>Page ${i + 1}</b><span style="flex:1"></span><button class="btn ghost icon-only danger" data-d="rm" title="Leave this page out">${icon('x')}</button></div>
+            ${i > 0 ? `<label class="check"><input type="checkbox" data-d="merge"${merged ? ' checked' : ''}> This is the same song as the page above</label>` : ''}
+            ${merged ? '' : `<div class="fields" style="margin-top:12px">
+              <label class="field full">Title<input data-d="title" value="${esc(d.title)}" placeholder="Song title"></label>
+              <label class="field" style="grid-column: span 2">Artist<select data-d="artist">${artistOptions(d.artist)}</select></label>
+              <label class="field">Key<select data-d="key">${keyOptions(d.key)}</select></label>
+            </div>${dup ? '<p class="warn" style="margin-top:8px">You already have a song with this title.</p>' : ''}`}
+            <label class="field full" style="margin-top:12px">Words<textarea data-d="text" rows="${merged ? 4 : 8}">${esc(d.text)}</textarea></label>
+          </section>`;
+        }).join('')}
+        <div class="save-bar"><span><b>${songsCount}</b> song${songsCount === 1 ? '' : 's'}</span><button class="btn primary" id="scanSave">${icon('check')}Add to library</button></div>`;
+    }
+
+    const rv = $('#scanReview');
+    const idx = (el) => +el.closest('.draft').dataset.i;
+    rv.addEventListener('input', (e) => {
+      const el = e.target, f = el.dataset.d;
+      if (f === 'title' || f === 'text') drafts[idx(el)][f] = el.value;
+    });
+    rv.addEventListener('change', (e) => {
+      const el = e.target;
+      if (el.id === 'allArtist') {
+        if (el.value === '__new') { el.value = ''; openArtistEditor(null, (out) => { if (out) { drafts.forEach((d) => { d.artist = out.name; }); renderReview(); } }); return; }
+        drafts.forEach((d) => { d.artist = el.value; });
+        renderReview();
+        return;
+      }
+      const f = el.dataset.d;
+      if (!f) return;
+      const d = drafts[idx(el)];
+      if (f === 'artist') {
+        if (el.value === '__new') { el.value = d.artist; openArtistEditor(null, (out) => { if (out) { d.artist = out.name; renderReview(); } }); return; }
+        d.artist = el.value;
+      } else if (f === 'key') d.key = el.value;
+      else if (f === 'merge') { d.merge = el.checked; renderReview(); }
+    });
+    rv.addEventListener('click', (e) => {
+      const rm = e.target.closest('[data-d="rm"]');
+      if (rm) { drafts.splice(idx(rm), 1); if (!drafts.length) { go('#/'); return; } renderReview(); return; }
+      if (!e.target.closest('#scanSave')) return;
+      const out = [];
+      drafts.forEach((d, i) => {
+        if (d.merge && i > 0 && out.length) out[out.length - 1].text += '\n\n' + (d.first ? d.first + '\n' : '') + d.text.trim();
+        else out.push({ title: d.title.trim(), artist: d.artist, key: d.key, text: d.text.trim() });
+      });
+      const missing = out.findIndex((o) => !o.title);
+      if (missing >= 0) {
+        const card = $$('.draft', rv).filter((c) => !drafts[+c.dataset.i].merge || +c.dataset.i === 0)[missing];
+        toast('Give every song a title first');
+        const input = card && card.querySelector('[data-d="title"]');
+        if (input) { input.scrollIntoView({ block: 'center' }); input.focus(); }
+        return;
+      }
+      const now = Date.now();
+      out.forEach((o, n) => songs.push({
+        id: uid(), title: o.title, artist: o.artist, key: o.key || 'C', tempo: '', time: '4/4', info: '', tags: ['Needs chords'],
+        chart: structureScanned(o.text), updated: now + n,
+      }));
+      ensureArtists();
+      saveLibrary();
+      toast(`Added ${out.length} song${out.length === 1 ? '' : 's'}. Open each one to add the chords.`);
+      go('#/');
+    });
   }
 
   /* ================= misc ================= */
