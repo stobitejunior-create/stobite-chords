@@ -28,6 +28,12 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 - `supabase/schema.sql` creates the tables, the security rules (only team members can read or write a team's songs) and the create/join functions. Run it in the Supabase SQL Editor.
 - Anonymous sign-ins must be switched on (Authentication → Sign In / Providers).
 
+## Layout
+
+- Phones: bottom bar = Songs, Artists, **+** (new song), Setlists, Favorites. Settings is the cog at the top right.
+- Computers: sidebar with the same pages plus Settings.
+- Settings is in sections: Team, Appearance, Preferences, Library (share, import, restore, recently deleted).
+
 ## Features
 
 - Songs with key, tempo, time signature, tags and notes. You can search, filter by tag, sort, and mark favourites.

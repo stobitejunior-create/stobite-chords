@@ -29,6 +29,7 @@
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     transpose: '<path d="M7 4v16M7 4 3 8M7 4l4 4M17 20V4M17 20l-4-4M17 20l4-4"/>',
+    cog: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
     camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
     globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
@@ -52,7 +53,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 26; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 27; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -588,6 +589,7 @@
   dock.id = 'dock';
   document.body.append(dock);
 
+  const cogBtn = () => `<a class="btn ghost icon-only cog" href="#/settings" title="Settings" aria-label="Settings">${icon('cog')}</a>`; // phones: Settings lives top right
   const NAV = [
     { key: 'songs', href: '#/', icon: 'music', label: 'Songs' },
     { key: 'artists', href: '#/artists', icon: 'mic', label: 'Artists' },
@@ -614,7 +616,9 @@
       <nav class="nav">${NAV.map((n) => `<a href="${n.href}" class="${n.key === active ? 'on' : ''}">${icon(n.icon)}${n.label}${counts[n.key] != null ? `<span class="n">${counts[n.key]}</span>` : ''}</a>`).join('')}</nav>
       ${recentSets.length ? `<div class="side-h">Setlists</div><div class="side-sets">${recentSets.map((s) => `<a href="#/set/${enc(s.id)}" style="--h:${hueOf(s.id)}"><i></i><span>${esc(s.name)}</span></a>`).join('')}</div>` : ''}
       <a class="side-foot sync-pill" href="#/settings" data-sync>${syncPill()}</a>`;
-    $('#tabs').innerHTML = NAV.map((n) => `<a href="${n.href}" class="${n.key === active ? 'on' : ''}">${icon(n.icon)}${n.label}</a>`).join('');
+    const tab = (n) => `<a href="${n.href}" class="${n.key === active ? 'on' : ''}">${icon(n.icon)}${n.label}</a>`;
+    const by = (k) => NAV.find((n) => n.key === k);
+    $('#tabs').innerHTML = [tab(by('songs')), tab(by('artists')), `<a class="tab-plus" href="#/new" aria-label="New song"><span>${icon('plus')}</span></a>`, tab(by('sets')), tab(by('favorites'))].join('');
   }
 
   function applyTheme() {
@@ -709,10 +713,8 @@
       <header class="topbar">
         <div class="tb-title"><h1>${fav ? 'Favorites' : 'Songs'}</h1><p class="sub"><span id="count"></span>${team ? ` · <a class="sync-pill inline" href="#/settings" data-sync>${syncPill()}</a>` : ''}</p></div>
         <div class="tb-actions">
-          <button class="btn ghost${state.selecting ? ' on' : ''}" data-act="select" title="Select songs to delete">${icon(state.selecting ? 'x' : 'check')}<span class="hide-sm">${state.selecting ? 'Done' : 'Select'}</span></button>
-          <button class="btn ghost" data-act="import" title="Import songs">${icon('download')}<span class="hide-sm">Import</span></button>
-          <button class="btn ghost" data-act="share-lib" title="Share library">${icon('share')}<span class="hide-sm">Share</span></button>
-          <a class="btn primary" href="#/new">${icon('plus')}<span>New</span></a>
+          <button class="btn ${state.selecting ? 'primary' : 'soft'}" data-act="select" title="Choose songs to delete">${icon('check')}<span>${state.selecting ? 'Done' : 'Select'}</span></button>
+          ${cogBtn()}
         </div>
       </header>
       <div class="content">
@@ -781,8 +783,10 @@
     if (!state.selecting) { bar?.remove(); return; }
     if (!bar) { bar = document.createElement('div'); bar.id = 'selbar'; bar.className = 'selbar'; main.append(bar); }
     const n = state.selected.size;
+    const everything = state.visible.length && state.visible.every((id) => state.selected.has(id));
     bar.innerHTML = `<span><b>${n}</b> selected</span>
-      <button class="btn ghost" data-act="select-all">${state.visible.length && state.visible.every((id) => state.selected.has(id)) ? 'Clear' : 'Select all'}</button>
+      ${everything ? '' : '<button class="btn ghost" data-act="select-all">Select all</button>'}
+      ${n ? '<button class="btn ghost" data-act="select-clear">Clear</button>' : ''}
       <button class="btn danger-fill" data-act="delete-selected" ${n ? '' : 'disabled'}>${icon('trash')}Delete</button>`;
   }
 
@@ -1196,11 +1200,8 @@
       case 'select':
         state.selecting = !state.selecting; state.selected = new Set();
         viewSongs(state.route.fav); break;
-      case 'select-all': {
-        const all = state.visible.every((id) => state.selected.has(id));
-        state.selected = all ? new Set() : new Set(state.visible);
-        fillList(state.route.fav); break;
-      }
+      case 'select-all': state.selected = new Set(state.visible); fillList(state.route.fav); break;
+      case 'select-clear': state.selected = new Set(); fillList(state.route.fav); break;
       case 'delete-selected':
         if (confirmDelete([...state.selected])) { state.selecting = false; state.selected = new Set(); viewSongs(state.route.fav); }
         break;
@@ -1273,7 +1274,7 @@
     main.innerHTML = `
       <header class="topbar">
         <div class="tb-title"><h1>Setlists</h1><p class="sub">${list.length} setlist${list.length === 1 ? '' : 's'}</p></div>
-        <div class="tb-actions"><button class="btn primary" id="newSet">${icon('plus')}<span>New setlist</span></button></div>
+        <div class="tb-actions"><button class="btn primary" id="newSet">${icon('plus')}<span>New setlist</span></button>${cogBtn()}</div>
       </header>
       <div class="content">
         ${list.length ? `<div class="set-grid">${list.map((s) => {
@@ -1627,7 +1628,7 @@ Jesus is the answer</pre>
     main.innerHTML = `
       <header class="topbar">
         <div class="tb-title"><h1>Artists</h1><p class="sub">${list.length} artist${list.length === 1 ? '' : 's'}${team ? ' · shared with the team' : ''}</p></div>
-        <div class="tb-actions"><button class="btn primary" id="artAdd">${icon('plus')}<span>Add artist</span></button></div>
+        <div class="tb-actions"><button class="btn primary" id="artAdd">${icon('plus')}<span>Add artist</span></button>${cogBtn()}</div>
       </header>
       <div class="content">
         <div class="art-opts">
@@ -1677,12 +1678,12 @@ Jesus is the answer</pre>
     }
     rows.sort((x, y) => y.t.at - x.t.at);
     if (!rows.length) return '';
-    return `<section class="card"><h2>Recently deleted</h2>
+    return `<div class="rd"><h3>Recently deleted</h3>
       <p class="sub" style="margin-bottom:10px">Nothing is ever really gone. Restore brings it back${team ? ' for everyone in the team' : ''}.</p>
       <div class="art-list">${rows.slice(0, 60).map((r) => `
         <div class="art-row"><span class="art-name"><b>${esc(r.name || 'Untitled')}</b><small>${r.label} · ${new Date(r.t.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</small></span>
           <button class="btn soft" data-restore="${r.kind}" data-id="${esc(r.t.item.id)}">Restore</button></div>`).join('')}</div>
-      ${rows.length > 60 ? `<p class="sub">…and ${rows.length - 60} more.</p>` : ''}</section>`;
+      ${rows.length > 60 ? `<p class="sub">…and ${rows.length - 60} more.</p>` : ''}</div>`;
   }
   function restoreTrash(kind, id) {
     const t = trashTake(kind, id);
@@ -1701,46 +1702,53 @@ Jesus is the answer</pre>
     document.title = 'Settings · Stobite Chords';
     const ownKeys = Object.keys(prefs.songKeys || {}).filter(byId).length;
     const seg = (attr, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-${attr}="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div>`;
+    const open = state.setOpen || (state.setOpen = { team: false, appearance: true, preferences: true, library: false }); // the team (and its members) is tucked away until you open it
+    const sec = (key, ic, title, summary, body) => `
+      <details class="set-sec" data-sec="${key}"${open[key] ? ' open' : ''}>
+        <summary><span class="set-ic">${icon(ic)}</span><span class="set-t"><b>${title}</b><small>${summary}</small></span><span class="chev">${icon('chevR')}</span></summary>
+        <div class="set-body">${body}</div>
+      </details>`;
+    const modeLabel = { numbers: '1 2 3', solfa: 'do re mi', letters: 'C D E' }[prefs.mode];
+    const partLabel = { keys: 'Keys', bass: 'Bass', lyrics: 'Lyrics' }[prefs.part];
+    const teamSummary = !cloudReady() ? 'Not switched on' : team ? `${esc(team.name)} · ${team.role === 'leader' ? 'Leader' : 'Member'}` : 'Not in a team yet';
     main.innerHTML = `
       <header class="topbar"><div class="tb-title"><h1>Settings</h1><p class="sub">Make it yours</p></div></header>
       <div class="content narrow">
-        ${teamCardHTML()}
-        <section class="card"><h2>Chord language</h2>
-          <div class="srow"><div><b>How we name chords</b><small>${esc(languageSummary())}</small></div>
-            <button class="btn soft" id="langEdit">${icon('lock')}Edit</button></div>
-        </section>
-        <section class="card"><h2>Appearance</h2>
+        ${sec('team', 'users', 'Team', teamSummary, teamCardHTML())}
+        ${sec('appearance', 'sliders', 'Appearance', `${{ auto: 'Auto', light: 'Light', dark: 'Dark' }[prefs.theme]} theme · text ${prefs.size}px`, `
           <div class="srow"><div><b>Theme</b><small>Follow your device, or choose one</small></div>
             ${seg('theme-set', prefs.theme, [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']])}</div>
           <div class="srow"><div><b>Text size</b><small>Currently ${prefs.size}px</small></div>
             <div class="seg"><button data-size="-2">A−</button><button data-size="2">A+</button></div></div>
-        </section>
-        ${recentlyDeletedHTML()}
-        <section class="card"><h2>Charts</h2>
+          <div class="srow"><div><b>Song pictures</b><small>The artist's portrait on their songs, or the key. Portraits are added in the Artists tab.</small></div>
+            ${seg('pictures', prefs.pictures === 'key' ? 'key' : 'portrait', [['portrait', 'Portrait'], ['key', 'Key']])}</div>`)}
+        ${sec('preferences', 'music', 'Preferences', `${modeLabel} · ${partLabel}${prefs.myKey ? ' · my key ' + esc(prettyKey(prefs.myKey)) : ''}`, `
           <div class="srow"><div><b>Chord names</b><small>How chords are written</small></div>
             ${seg('mode', prefs.mode, [['numbers', '1 2 3'], ['solfa', 'do re mi'], ['letters', 'C D E']])}</div>
-          <div class="srow"><div><b>Auto-scroll speed</b><small>Used by the play button in full screen (and the space bar). 1 is very slow.</small></div>
-            <label class="speed"><input type="range" id="scrollSpeed" min="1" max="${SCROLL_MAX}" step="1" value="${Math.min(SCROLL_MAX, prefs.scrollSpeed)}" aria-label="Auto-scroll speed"><b id="scrollSpeedVal">${Math.min(SCROLL_MAX, prefs.scrollSpeed)}</b></label></div>
           <div class="srow"><div><b>My default view</b><small>What opens for you on this device. Bass shows only the bass note (1/5 → 5)</small></div>
             ${seg('part', prefs.part, [['keys', 'Keys'], ['bass', 'Bass'], ['lyrics', 'Lyrics']])}</div>
           <div class="srow"><div><b>My key</b><small>Every song shows in this key for you, so tapping a chord shows it in this key. Only on this device. ${ownKeys ? `${ownKeys} song${ownKeys > 1 ? 's have' : ' has'} a key of its own. <button class="link" id="clearSongKeys">Use my key for all</button>` : 'A song you change yourself keeps its own key.'}</small></div>
             <select class="pill-select" id="myKeySel" aria-label="My key"><option value="">Band’s key</option>${KEYS.map((k) =>
               `<option value="${k}"${k === prefs.myKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></div>
+          <div class="srow"><div><b>Auto-scroll speed</b><small>Used by the play button in full screen (and the space bar). 1 is very slow.</small></div>
+            <label class="speed"><input type="range" id="scrollSpeed" min="1" max="${SCROLL_MAX}" step="1" value="${Math.min(SCROLL_MAX, prefs.scrollSpeed)}" aria-label="Auto-scroll speed"><b id="scrollSpeedVal">${Math.min(SCROLL_MAX, prefs.scrollSpeed)}</b></label></div>
           <div class="srow"><div><b>Metronome click</b><small>Off = flashing light only</small></div>
             <button class="switch" role="switch" id="snd" aria-checked="${prefs.metroSound}" aria-label="Metronome click sound"></button></div>
-        </section>
-        <section class="card"><h2>Library</h2>
+          <div class="srow"><div><b>Chord language</b><small>${esc(languageSummary())}</small></div>
+            <button class="btn soft" id="langEdit">${icon('lock')}Edit</button></div>`)}
+        ${sec('library', 'file', 'Library', `${songs.length} song${songs.length === 1 ? '' : 's'} · ${setlists.length} setlist${setlists.length === 1 ? '' : 's'}`, `
           <div class="srow"><div><b>Share or back up</b><small>${songs.length} songs and ${setlists.length} setlists as one file</small></div>
             <button class="btn soft" data-act="share-lib">${icon('share')}Share library</button></div>
           <div class="srow"><div><b>Import</b><small>Add songs someone shared with you</small></div>
             <button class="btn" data-act="import">${icon('download')}Import</button></div>
           <div class="srow"><div><b>Starter hymns</b><small>Put back any of the included hymns you deleted</small></div>
             <button class="btn" id="restore">Restore</button></div>
+          ${recentlyDeletedHTML()}
           ${team ? '' : `<div class="srow"><div><b>Erase everything</b><small>Removes all songs and setlists from this device</small></div>
-            <button class="btn danger" id="wipe">${icon('trash')}Erase</button></div>`}
-        </section>
+            <button class="btn danger" id="wipe">${icon('trash')}Erase</button></div>`}`)}
         <p class="about"><b>Stobite Chords</b> <span class="ver">version ${APP_VERSION}</span> · ${team ? `Songs are shared with ${esc(team.name)} and kept on this device for offline use.` : 'Your songs stay on this device.'}<br>Keyboard: Space scroll · ←/→ setlist · M metronome · F stage · +/− size</p>
       </div>`;
+    for (const d of $$('.set-sec')) d.addEventListener('toggle', () => { state.setOpen[d.dataset.sec] = d.open; });
     $('#snd').addEventListener('click', () => { prefs.metroSound = !prefs.metroSound; savePrefs(); viewSettings(); });
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags], updated: Date.now() })), setlists: [] }); viewSettings(); });
     bindTeamCard();
@@ -2433,21 +2441,20 @@ Jesus is the answer</pre>
 
   function teamCardHTML() {
     if (!cloudReady()) {
-      return `<section class="card team-card"><h2>Team</h2>
-        <div class="srow"><div><b>Team sync isn't switched on yet</b><small>Songs stay on this device. Use Share to send them to people.</small></div></div></section>`;
+      return `<div class="team-card"><div class="srow"><div><b>Team sync isn't switched on yet</b><small>Songs stay on this device. Use Share to send them to people.</small></div></div></div>`;
     }
     if (!team) {
-      return `<section class="card team-card"><h2>Team</h2>
+      return `<div class="team-card">
         <div class="team-empty">
           <div class="bubble">${icon('users')}</div>
           <div><b>Share one library with your band</b><small>Everyone sees the same songs and setlists, and edits show up on every phone straight away.</small></div>
         </div>
         <div class="team-actions"><button class="btn primary" id="tCreate">${icon('plus')}Create a team</button><button class="btn" id="tJoin">${icon('users')}Join a team</button></div>
         <p class="team-note">Lost the code? <button class="link" id="tFind">Find our team</button> (needs the admin password).</p>
-      </section>`;
+      </div>`;
     }
     const leader = team.role === 'leader';
-    return `<section class="card team-card"><h2>Team</h2>
+    return `<div class="team-card">
       <div class="team-head">
         <div class="logo sm">${esc((team.name || '?')[0].toUpperCase())}</div>
         <div><b>${esc(team.name)}</b><small>You're ${esc(team.myName)} · ${leader ? 'Leader' : 'Member'}</small></div>
@@ -2471,7 +2478,7 @@ Jesus is the answer</pre>
         <button class="btn" id="tSync">${icon('scroll')}Sync now</button><button class="btn danger" id="tLeave">Leave team</button>
       </div>
       <p class="team-note">Removing the app from your home screen signs this phone out. The team's songs stay safe: rejoin with the code${leader ? ', then use Make me leader with the admin password' : ''}.</p>
-    </section>`;
+    </div>`;
   }
 
   function bindTeamCard() {
@@ -3163,9 +3170,7 @@ Jesus is the answer</pre>
     const drawArtistBox = () => {
       const a = artistByName(f.artist.value);
       box.innerHTML = a ? `<div class="pbox"><span class="pthumb">${a.photo ? `<img src="${esc(a.photo)}" alt="">` : icon('image')}</span>
-        <div class="ptext"><b>${esc(a.name)}</b><small>${a.photo ? (a.src === 'own' ? 'Your photo' : 'Portrait found automatically') : 'No portrait yet'}${team ? ' · shared with the team' : ''}</small></div>
-        <div class="pbtns"><button type="button" class="btn soft" id="artEdit">Edit artist</button></div></div>` : '';
-      $('#artEdit')?.addEventListener('click', () => openArtistEditor(a, (out) => { if (out) setArtist(out); else { fillArtistSelect(''); setArtist(null); } }));
+        <div class="ptext"><b>${esc(a.name)}</b><small>Artists and portraits are managed in the Artists tab</small></div></div>` : '';
     };
     const setArtist = (a) => {
       f.artist.value = a ? a.name : '';
