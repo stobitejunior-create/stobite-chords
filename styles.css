@@ -811,3 +811,15 @@ dialog.busy-modal p { margin: 0; }
 dialog.photo-modal { width: min(560px, calc(100vw - 16px)); }
 .photo-view { max-height: 70vh; overflow: auto; border-radius: 12px; border: 1px solid var(--line); background: #fff; margin-bottom: 14px; -webkit-overflow-scrolling: touch; }
 .photo-view img { display: block; width: 190%; max-width: none; height: auto; }
+
+/* ============ audit ============ */
+.audit-list { display: grid; gap: 8px; }
+.audit-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 12px 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); cursor: pointer; color: var(--text); }
+.audit-row:hover { border-color: color-mix(in srgb, var(--primary) 40%, var(--line)); }
+.audit-row .art-name small { white-space: normal; }
+.audit-row .who { color: var(--muted); }
+.audit-row .who b { color: var(--text); }
+.tagdel { font-style: normal; font-size: 11px; font-weight: 800; color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); padding: 2px 7px; border-radius: 999px; margin-left: 6px; }
+.ver-row { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-top: 1px solid var(--line); }
+.ver-row:first-child { border-top: 0; }
+.ver-row .art-name small { white-space: normal; }

@@ -48,6 +48,8 @@ Settings → Team → **Create a team** gives a code and an invite link. Everyon
 - Scan paper: photograph a printed lyric page and it is read into the lyrics box (reading tool downloads the first time). Find lyrics online: type the title and artist and the app offers to pull the lyrics from a free public service (LRCLIB).
 - Artists are shared items (name + portrait you choose). Pick one from a list when adding a song, or add a new one, so names are always spelled the same. With a team they are shared with everyone. Renaming an artist renames them on all their songs. The Artists tab lists them all, with their songs.
 - Nothing is lost: deleted songs, setlists and artists go to Settings → Recently deleted and can be restored for the whole team. A device can never delete by itself: only what you delete on purpose is sent. The database keeps a history of every change (supabase/schema.sql update 7).
+- Admin audit: Settings → Preferences → Audit (admin password) lists every song with who last edited it and when. Tap a song to see every earlier version, who made it and what changed, and restore any of them for the whole team (needs supabase/schema.sql updates 7 and 8).
+- Artist photos are protected: a blank photo can't overwrite one by accident (the database keeps the old photo unless you removed it on purpose), and a device that still has the photo sends it back to the team.
 - Lost the team code? Settings → Team → Find our team (admin password) lists every team with its code.
 - Delete a song from its page, or tap Select in the library to delete several at once (with Undo).
 - Keys, Bass (bass note only) or Lyrics-only view.

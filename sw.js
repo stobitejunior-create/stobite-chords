@@ -1,5 +1,5 @@
 // Offline support: network first, fall back to the cached copy.
-const CACHE = 'stobite-chords-v30';
+const CACHE = 'stobite-chords-v31';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'config.js', 'songs.js', 'manifest.webmanifest', 'icon.svg', 'apple-touch-icon.png', 'icon-512.png', 'digit-model.js'];
 
 self.addEventListener('install', (e) => {

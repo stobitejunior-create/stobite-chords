@@ -53,7 +53,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 30; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 31; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -602,7 +602,7 @@
     if (r.name === 'songs') return r.fav ? 'favorites' : 'songs';
     if (r.name === 'artists' || r.name === 'artist') return 'artists';
     if (r.name === 'sets' || r.name === 'set' || (r.name === 'song' && r.setId)) return 'sets';
-    if (r.name === 'settings' || r.name === 'language') return 'settings';
+    if (r.name === 'settings' || r.name === 'language' || r.name === 'audit') return 'settings';
     return 'songs';
   }
 
@@ -648,6 +648,7 @@
       case 'new': return { name: 'edit', id: null };
       case 'settings': return { name: 'settings' };
       case 'language': return { name: 'language' };
+      case 'audit': return { name: 'audit' };
       default: return { name: 'songs', fav: false };
     }
   }
@@ -681,6 +682,7 @@
     else if (r.name === 'edit') viewEditor(r.id);
     else if (r.name === 'settings') viewSettings();
     else if (r.name === 'language') viewLanguage();
+    else if (r.name === 'audit') viewAudit();
     window.scrollTo(0, 0);
     renderDock();
   }
@@ -1738,7 +1740,9 @@ Jesus is the answer</pre>
           <div class="srow"><div><b>Metronome click</b><small>Off = flashing light only</small></div>
             <button class="switch" role="switch" id="snd" aria-checked="${prefs.metroSound}" aria-label="Metronome click sound"></button></div>
           <div class="srow"><div><b>Chord language</b><small>${esc(languageSummary())}</small></div>
-            <button class="btn soft" id="langEdit">${icon('lock')}Edit</button></div>`)}
+            <button class="btn soft" id="langEdit">${icon('lock')}Edit</button></div>
+          ${team ? `<div class="srow"><div><b>Audit (admin)</b><small>See who last edited each song, and bring back an older version</small></div>
+            <button class="btn soft" id="auditOpen">${icon('lock')}Open</button></div>` : ''}`)}
         ${sec('library', 'file', 'Library', `${songs.length} song${songs.length === 1 ? '' : 's'} · ${setlists.length} setlist${setlists.length === 1 ? '' : 's'}`, `
           <div class="srow"><div><b>Share or back up</b><small>${songs.length} songs and ${setlists.length} setlists as one file</small></div>
             <button class="btn soft" data-act="share-lib">${icon('share')}Share library</button></div>
@@ -1758,6 +1762,7 @@ Jesus is the answer</pre>
     $('#restore').addEventListener('click', () => { mergeAll({ songs: STARTER_SONGS.map((s) => ({ ...s, tags: [...s.tags], updated: Date.now() })), setlists: [] }); viewSettings(); });
     bindTeamCard();
     $('#langEdit').addEventListener('click', unlockLanguage);
+    $('#auditOpen')?.addEventListener('click', () => askAdminPassword('Audit', 'For the music director: see who last edited every song.', (pw) => { state.adminPw = pw; go('#/audit'); }));
     for (const b of $$('[data-restore]')) b.addEventListener('click', () => { restoreTrash(b.dataset.restore, b.dataset.id); viewSettings(); });
     $('#scrollSpeed').addEventListener('input', (e) => { prefs.scrollSpeed = +e.target.value; $('#scrollSpeedVal').textContent = e.target.value; });
     $('#scrollSpeed').addEventListener('change', savePrefs);
@@ -2070,12 +2075,15 @@ Jesus is the answer</pre>
 
   /** Merge rows from the server into this device. Newest edit wins. Returns true if anything changed here. */
   const artistToRow = (a) => ({ team_id: team.id, id: a.id, name: (a.name || '').slice(0, 200), photo: a.photo || '', src: a.src || '', updated: a.updated || 0, deleted: false });
-  const rowToArtist = (r) => ({ id: r.id, name: r.name, photo: r.photo || '', src: r.src || '', updated: Number(r.updated) || 0, derived: false });
+  const rowToArtist = (r) => { // the live feed can leave out big unchanged fields: a missing photo means "unchanged", not "none"
+    const mine = artistById(r.id);
+    return { id: r.id, name: r.name, photo: r.photo != null ? r.photo : (mine ? mine.photo : ''), src: r.src != null ? r.src : (mine ? mine.src : ''), updated: Number(r.updated) || 0, derived: false };
+  };
   const missingArtistsTable = (err) => /artists|schema cache|relation/i.test((err && err.message) || '');
 
   /** Merge artist rows from the team into this device (newest edit wins). */
   function applyRemoteArtists(rows) {
-    let changed = false;
+    let changed = false, healed = false;
     for (const r of rows) {
       const u = Number(r.updated) || 0, mine = artistById(r.id), t = trashFind('artists', r.id);
       if (r.deleted) {
@@ -2086,11 +2094,16 @@ Jesus is the answer</pre>
         if (t) trashTake('artists', r.id);
         artists.push(rowToArtist(r)); synced.artists[r.id] = { u, d: false }; changed = true;
       } else if (u > (mine.updated || 0)) {
-        Object.assign(mine, rowToArtist(r)); synced.artists[r.id] = { u, d: false }; changed = true;
+        const keep = mine.photo, keepSrc = mine.src;
+        Object.assign(mine, rowToArtist(r));
+        if (keep && !mine.photo && r.src !== 'removed') { mine.photo = keep; mine.src = keepSrc; mine.updated = Math.max(u + 1, Date.now()); healed = true; } // heal: send our photo back to the team
+        else synced.artists[r.id] = { u, d: false };
+        changed = true;
       } else if (u === (mine.updated || 0)) synced.artists[r.id] = { u, d: false };
     }
     if (changed) writeJSON(artistsKey(), artists);
     writeJSON(syncedKey(), synced);
+    if (healed) scheduleSync();
     return changed;
   }
 
@@ -2110,8 +2123,9 @@ Jesus is the answer</pre>
     try {
       const now = Date.now();
       const dirty = artists.filter((a) => { const m = synced.artists[a.id]; return !m || m.d || (a.updated || 0) > m.u; });
-      const real = dirty.filter((a) => !a.derived).map(artistToRow);
-      const soft = dirty.filter((a) => a.derived).map(artistToRow); // made automatically from song names: never overwrite what the team already has
+      const toRow = (a) => { const r = artistToRow(a); if (sync.noRemovedSrc && r.src === 'removed') r.src = ''; return r; };
+      const real = dirty.filter((a) => !a.derived).map(toRow);
+      const soft = dirty.filter((a) => a.derived).map(toRow); // made automatically from song names: never overwrite what the team already has
       for (const t of trash.artists) if (!t.sent) real.push({ ...artistToRow(t.item), updated: Math.max(t.at, ((synced.artists[t.item.id] || {}).u || 0) + 1), deleted: true });
       for (const [list, opts] of [[real, { onConflict: 'team_id,id' }], [soft, { onConflict: 'team_id,id', ignoreDuplicates: true }]]) {
         for (let i = 0; i < list.length; i += 100) {
@@ -2122,14 +2136,19 @@ Jesus is the answer</pre>
         }
       }
       if (real.length || soft.length) { saveTrash(); writeJSON(syncedKey(), synced); }
-    } catch (err) { if (missingArtistsTable(err)) sync.noArtists = true; }
+    } catch (err) {
+      if (/src_check|check constraint/i.test((err && err.message) || '') && !sync.noRemovedSrc) { sync.noRemovedSrc = true; return pushArtists(); } // database not updated yet: send removed photos the old way
+      if (missingArtistsTable(err)) sync.noArtists = true;
+    }
   }
 
   function subscribeArtists() {
     if (sync.artChannel) sync.client.removeChannel(sync.artChannel);
     sync.artChannel = sync.client.channel('team-art-' + team.id)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'artists', filter: `team_id=eq.${team.id}` }, (p) => {
-        if (p.new && p.new.id && applyRemoteArtists([p.new])) { ensureArtists(); refreshView(); }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'artists', filter: `team_id=eq.${team.id}` }, async (p) => {
+        if (!p.new || !p.new.id) return;
+        const row = await fullRow('artists', p.new);
+        if (applyRemoteArtists([row])) { ensureArtists(); refreshView(); }
       })
       .subscribe();
   }
@@ -2242,8 +2261,17 @@ Jesus is the answer</pre>
       .subscribe();
   }
 
-  function onRemote(table, row) {
-    if (!row || !row.id) return;
+  /** A live update can arrive without its large fields (photo, chart): fetch the whole row instead. */
+  async function fullRow(table, row) {
+    try {
+      const { data } = await sync.client.from(table).select('*').eq('team_id', team.id).eq('id', row.id).maybeSingle();
+      return data || row;
+    } catch { return row; }
+  }
+
+  async function onRemote(table, row0) {
+    if (!row0 || !row0.id) return;
+    const row = await fullRow(table, row0);
     const editing = state.route && state.route.name === 'edit' && table === 'songs' && state.route.id === row.id;
     const changed = table === 'songs' ? applyRemote([row], []) : applyRemote([], [row]);
     if (!changed) return;
@@ -2634,6 +2662,108 @@ Jesus is the answer</pre>
     });
   }
 
+  /* ---------- audit: who last edited what (admin only) ---------- */
+  const ago = (ms) => {
+    const d = Date.now() - ms, m = Math.round(d / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m} min ago`;
+    if (m < 1440) return `${Math.round(m / 60)} h ago`;
+    if (m < 43200) return `${Math.round(m / 1440)} day${Math.round(m / 1440) === 1 ? '' : 's'} ago`;
+    return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+  const whenFull = (ms) => new Date(Number(ms)).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const editorName = (name, id) => name || (id ? 'A former member' : 'Unknown');
+  const auditError = (err) => /admin_audit|admin_song_history|function/i.test(err.message) ? 'The database needs its latest update first (supabase/run-this-now.sql).' : err.message;
+
+  async function viewAudit() {
+    if (!team || !state.adminPw) { go('#/settings'); return; }
+    document.title = 'Audit · Stobite Chords';
+    main.innerHTML = `
+      <header class="topbar lined"><a class="btn ghost" href="#/settings">${icon('chevL')}<span>Settings</span></a>
+        <div class="tb-title" style="text-align:center"><b>Audit</b></div><div class="tb-actions"><span style="width:40px"></span></div></header>
+      <div class="content narrow" style="padding-top:16px"><p class="sub" id="auditLoad">Loading…</p></div>`;
+    try {
+      const c = await cloud();
+      const { data, error } = await c.rpc('admin_audit', { pw: state.adminPw, t: team.id });
+      if (error) throw error;
+      renderAudit(data || []);
+    } catch (err) {
+      if (/wrong password/i.test(err.message)) state.adminPw = '';
+      toast(auditError(err));
+      go('#/settings');
+    }
+  }
+
+  function renderAudit(rows) {
+    const wrap = $('.content');
+    wrap.innerHTML = `
+      <p class="sub" style="margin-bottom:12px">${rows.length} song${rows.length === 1 ? '' : 's'} in ${esc(team.name)}. Tap one to see every version and who made it.</p>
+      <div class="searchbar sm" style="margin-bottom:12px">${icon('search')}<input type="search" id="auditQ" placeholder="Search songs…" autocomplete="off"></div>
+      <div class="audit-list" id="auditList"></div>`;
+    const draw = () => {
+      const q = normName($('#auditQ').value);
+      $('#auditList').innerHTML = rows.filter((r) => !q || normName(`${r.song_title} ${r.song_artist} ${r.last_name || ''}`).includes(q)).map((r, i) => `
+        <button class="audit-row" data-i="${rows.indexOf(r)}">
+          <span class="art-name"><b>${esc(r.song_title || '(blank)')}${r.is_deleted ? ' <em class="tagdel">deleted</em>' : ''}</b>
+            <small>${esc(r.song_artist || '')}</small>
+            <small class="who">Last edited by <b>${esc(editorName(r.last_name, r.last_by))}</b> · ${esc(ago(Number(r.last_at)))}${Number(r.versions) ? ` · ${r.versions} earlier version${Number(r.versions) === 1 ? '' : 's'}` : ''}</small></span>
+          ${icon('chevR')}</button>`).join('') || '<p class="sub">No songs match.</p>';
+    };
+    $('#auditQ').addEventListener('input', draw);
+    $('#auditList').addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (b) openSongHistory(rows[+b.dataset.i]); });
+    draw();
+  }
+
+  const CHANGE_FIELDS = [['title', 'title'], ['artist', 'artist'], ['key', 'key'], ['tempo', 'tempo'], ['time', 'time signature'], ['info', 'notes'], ['play_key', 'band key'], ['video', 'YouTube link']];
+  /** What differs between a version and the one before it. */
+  function describeChange(cur, older) {
+    if (!older) return 'First version';
+    if (cur.deleted && !older.deleted) return 'Deleted';
+    if (!cur.deleted && older.deleted) return 'Restored';
+    const out = CHANGE_FIELDS.filter(([k]) => String(cur[k] ?? '') !== String(older[k] ?? '')).map(([, label]) => label);
+    if (JSON.stringify(cur.tags || []) !== JSON.stringify(older.tags || [])) out.push('tags');
+    if ((cur.chart || '') !== (older.chart || '')) {
+      const a = new Set((older.chart || '').split('\n')), b = new Set((cur.chart || '').split('\n'));
+      const plus = [...b].filter((l) => !a.has(l)).length, minus = [...a].filter((l) => !b.has(l)).length;
+      out.push(`words/chords (+${plus} −${minus} lines)`);
+    }
+    return out.length ? 'Changed ' + out.join(', ') : 'Saved without changes';
+  }
+
+  async function openSongHistory(row) {
+    const busy = busyModal('Loading the history…', row.song_title || '');
+    let list = [];
+    try {
+      const c = await cloud();
+      const { data, error } = await c.rpc('admin_song_history', { pw: state.adminPw, t: team.id, sid: row.song_id });
+      if (error) throw error;
+      list = data || [];
+    } catch (err) { busy.close(); toast(auditError(err)); return; }
+    busy.close();
+    const d = modal(`
+      <h2>${esc(row.song_title || 'Song')}</h2>
+      <p>Newest first. “Restore” puts that version back for the whole team.</p>
+      <div class="pick-list">${list.map((v, i) => `
+        <div class="ver-row">
+          <span class="art-name"><b>${esc(whenFull(v.at))}</b>
+            <small>by <b>${esc(editorName(v.name, v.by))}</b> · ${esc(describeChange(v.data, list[i + 1] && list[i + 1].data))}${i === 0 ? ' · current' : ''}</small></span>
+          ${i === 0 && !v.data.deleted ? '' : `<button class="btn soft" data-v="${i}">Restore</button>`}
+        </div>`).join('') || '<p class="sub">No history yet.</p>'}</div>
+      <div class="row"><form method="dialog"><button class="btn ghost">Close</button></form></div>`);
+    d.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]');
+      if (!b) return;
+      const picked = list[+b.dataset.v], v = picked.data, mine = byId(row.song_id);
+      const prior = Math.max(Number(list[0].at) || 0, mine ? mine.updated || 0 : 0, ((synced.songs[row.song_id] || {}).u) || 0);
+      const song = { id: row.song_id, title: v.title, artist: v.artist || '', key: v.key || '', tempo: v.tempo ?? '', time: v.time || '', info: v.info || '', tags: v.tags || [], chart: v.chart || '', playKey: v.play_key || '', video: v.video || '', updated: Math.max(Date.now(), prior + 1) };
+      if (mine) Object.assign(mine, song);
+      else { trashTake('songs', row.song_id); songs.push(song); }
+      saveLibrary(); ensureArtists(); renderNav();
+      d.close();
+      toast(`Restored the version from ${whenFull(picked.at)}`);
+    });
+  }
+
   function claimLeader() {
     askAdminPassword('Make me leader', 'For the music director: take the leader role for this team, so you can manage members and the code.', async (pw) => {
       const { error } = await sync.client.rpc('claim_leader', { t: team.id, pw });
@@ -2941,7 +3071,7 @@ Jesus is the answer</pre>
       try { const url = URL.createObjectURL(file); draft.photo = await squareThumb(url); draft.src = 'own'; URL.revokeObjectURL(url); paint(); }
       catch (err) { toast(err.message || 'Could not use that photo'); }
     });
-    $('#aNone', d).addEventListener('click', () => { draft.photo = ''; draft.src = ''; paint(); });
+    $('#aNone', d).addEventListener('click', () => { draft.photo = ''; draft.src = 'removed'; paint(); }); // on purpose: the team database only accepts an empty photo when it says so
     $('#aDel')?.addEventListener('click', () => {
       if (!confirm(`Delete the artist “${a.name}”?`)) return;
       trashPut('artists', a);
@@ -3729,6 +3859,7 @@ Jesus is the answer</pre>
     requestAnimationFrame(() => setTimeout(() => { vpMeta.content = vpBase; unzooming = false; }, 60));
   });
 
+  if (location.hostname === 'localhost') window.__test = { sync, state, renderAudit, openSongHistory }; // test aid, local only
   window.addEventListener('hashchange', route);
   ensureArtists();
   route();
