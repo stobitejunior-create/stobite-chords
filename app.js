@@ -23,6 +23,7 @@
     printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/>',
     stage: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
     chevL: '<path d="m15 18-6-6 6-6"/>',
+    chevU: '<path d="m18 15-6-6-6 6"/>',
     chevR: '<path d="m9 18 6-6-6-6"/>',
     up: '<path d="m18 15-6-6-6 6"/>',
     down: '<path d="m6 9 6 6 6-6"/>',
@@ -53,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 31; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 32; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1439,7 +1440,11 @@
   }
 
   /* ================= editor ================= */
-  const chordButtons = () => ['1', '2', '3', '4', '5', '6', '7', ...language.custom.map((c) => c.name).filter(Boolean), 'b7', '1/3', '5/7', '4/5', 'b7/5'];
+  const CHORD_GROUPS = () => [
+    { label: 'Chords', sets: [{ items: ['1', '2', '3', '4', '5', '6', '7'] }, { items: [...new Set([...language.custom.map((c) => c.name).filter(Boolean), 'b7', 'b3', 'b6', '#4'])] }] },
+    { label: 'Bass', sets: [{ items: ['5/4', '1/5', '4/1', '1/3', '4/5', '5/7', '2/5', '6/5', 'b7/5'] }, { kind: 'sym', items: ['[ ]', '♭', '♯', 'm', '7', 'maj7', 'sus4', 'add9', '+', '°', '/'] }] },
+    { label: 'Parts', sets: [{ kind: 'sec', items: ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Tag', 'Turnaround', 'Interlude', 'Instrumental', 'Refrain', 'Vamp', 'Outro', 'Ending'] }] },
+  ];
 
   function viewEditor(id) {
     const existing = id ? byId(id) : null;
@@ -1480,17 +1485,15 @@
           <div class="card pane">
             <div class="pane-h"><h2>Lyrics &amp; chords</h2><button type="button" class="link" id="helpBtn">How to write chords</button></div>
             <div class="get-lyrics">
-              <button type="button" class="btn soft" id="scanBtn">${icon('camera')}Scan paper</button>
               <button type="button" class="btn soft" id="findBtn">${icon('globe')}Find lyrics online</button>
-              <a class="btn ghost" href="#/scan">${icon('file')}Scan many pages</a>
-              <input type="file" id="scanFile" accept="image/*" hidden>
             </div>
             <div class="offer" id="lyricsOffer" hidden></div>
             <div class="chordbar" id="cbar">
-              ${[...new Set(chordButtons())].map((c) => `<button type="button" data-ins="[${esc(c)}]">${esc(prettyName(c))}</button>`).join('')}
-              <button type="button" data-ins="[]" data-back="1">[ ]</button>
-              ${['♭', '♯', 'm', '7', '+', '°', '/'].map((x) => `<button type="button" class="symb" data-ins="${x}" title="Type ${x}">${x}</button>`).join('')}
-              ${['Verse', 'Chorus', 'Bridge'].map((x) => `<button type="button" class="secb" data-sec="${x}">${x}</button>`).join('')}
+              ${CHORD_GROUPS().map((g) => `<div class="cb-group"><span class="cb-label">${g.label}</span><div class="cb-row">${g.sets.map((st) => st.items.map((x) => st.kind === 'sec'
+                ? `<button type="button" class="secb" data-sec="${esc(x)}">${esc(x)}</button>`
+                : st.kind === 'sym' ? `<button type="button" class="symb" data-ins="${esc(x)}" title="Type ${esc(x)}">${esc(x)}</button>`
+                : `<button type="button" data-ins="[${esc(x)}]">${esc(prettyName(x))}</button>`).join('')).join('<i class="cb-sep"></i>')}</div></div>`).join('')}
+              <button type="button" class="cb-toggle" id="cbToggle" aria-label="Hide buttons">${icon('chevU')}</button>
             </div>
             <textarea id="chartInput" spellcheck="false" autocapitalize="sentences" placeholder="Verse 1&#10;[1]Jesus is the [7]answer&#10;&#10;— or put the chords on the line above —&#10;&#10;1                   7&#10;Jesus is the answer">${esc(s.chart)}</textarea>
           </div>
@@ -1582,8 +1585,10 @@ Jesus is the answer</pre>
     $('#cbar').addEventListener('click', (e) => {
       const b = e.target.closest('button');
       if (!b) return;
+      if (b.id === 'cbToggle') { const c = $('#cbar'); c.classList.toggle('closed'); b.setAttribute('aria-label', c.classList.contains('closed') ? 'Show buttons' : 'Hide buttons'); return; }
       const start = ta.selectionStart, end = ta.selectionEnd;
       let ins = b.dataset.ins;
+      if (ins === '[ ]') ins = '[]', b.dataset.back = '1'; else delete b.dataset.back;
       if (b.dataset.sec) {
         // A heading needs its own line, but no blank lines around it.
         const before = ta.value[start - 1], after = ta.value[end];
@@ -3485,8 +3490,8 @@ Jesus is the answer</pre>
     };
 
     // scan a paper page
-    $('#scanBtn').addEventListener('click', () => $('#scanFile').click());
-    $('#scanFile').addEventListener('change', async (e) => {
+    $('#scanBtn')?.addEventListener('click', () => $('#scanFile').click());
+    $('#scanFile')?.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       e.target.value = '';
       if (!file) return;

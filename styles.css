@@ -823,3 +823,16 @@ dialog.photo-modal { width: min(560px, calc(100vw - 16px)); }
 .ver-row { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-top: 1px solid var(--line); }
 .ver-row:first-child { border-top: 0; }
 .ver-row .art-name small { white-space: normal; }
+
+/* editor: grouped chord buttons that stay in view while you write */
+.chordbar { flex-wrap: nowrap; position: sticky; top: var(--tb); z-index: 8; display: flex; flex-direction: column; gap: 4px; margin: 0 -4px 10px; padding: 6px 4px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.chordbar .cb-group { display: flex; align-items: center; gap: 8px; }
+.chordbar .cb-label { flex: 0 0 46px; font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted, #888); }
+.chordbar .cb-row { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; flex: 1; padding-right: 30px; }
+.chordbar .cb-row::-webkit-scrollbar { display: none; }
+.chordbar button { flex: 0 0 auto; min-height: 32px; min-width: 36px; padding: 4px 9px; font-size: 13.5px; }
+.chordbar button.secb { font-size: 12px; }
+.chordbar .cb-toggle { position: absolute; right: 4px; top: 4px; min-width: 30px; min-height: 28px; padding: 0; background: var(--surface-2); color: var(--text); }
+.chordbar.closed .cb-group { display: none; }
+.chordbar.closed { min-height: 36px; }
+.chordbar .cb-sep { flex: 0 0 1px; align-self: stretch; margin: 2px 3px; background: var(--line); }
