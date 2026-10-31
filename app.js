@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 32; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 33; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -427,7 +427,7 @@
   }
 
   /* ================= chart parsing ================= */
-  const SECTION_RE = /^\s*(?:\{\s*(.+?)\s*\}|((?:verse|chorus|pre-?chorus|bridge|intro|outro|tag|ending|interlude|refrain|coda|vamp|instrumental|hook|turnaround)(?:\s*\d+)?(?:\s*\(.*\))?)\s*:?)\s*$/i;
+  const SECTION_RE = /^\s*(?:\{\s*(.+?)\s*\}|((?:verse|chorus|pre-?chorus|bridge|intro|outro|tag|ending|interlude|refrain|coda|vamp|instrumental|hook|turnaround)(?:\s*\d+)?(?:\s*\(.*\))?)\s*:?|<\s*([^<>]+?)\s*>)\s*$/i;
   const FILLER_RE = /^(?:\|+|-|\/|%|x\d+|\(x\d+\)|N\.?C\.?)$/i;
   const isChordTok = (t) => !!(parseNum(t) || parseLetter(t) || customFor(splitBass(normTok(t))[0]));
 
@@ -482,6 +482,7 @@
     return segs;
   }
 
+  const sectionKnown = (name) => /verse|chorus|hook|bridge|refrain|pre-?chorus/i.test(name);
   function sectionKind(name) {
     const n = name.toLowerCase();
     if (/pre-?chorus/.test(n)) return 'pre';
@@ -521,7 +522,7 @@
     for (const raw of toInlineLines(text)) {
       const line = raw.replace(/\s+$/, '');
       const sec = line.trim() && SECTION_RE.exec(line);
-      if (sec) { blocks.push(cur); cur = { name: sec[1] || sec[2], lines: [] }; continue; }
+      if (sec) { blocks.push(cur); cur = { name: sec[1] || sec[2] || sec[3], own: !!sec[3] && !sectionKnown(sec[3]), lines: [] }; continue; }
       cur.lines.push(line);
     }
     blocks.push(cur);
@@ -530,7 +531,7 @@
       while (b.lines.length && !b.lines[0].trim()) b.lines.shift();
       while (b.lines.length && !b.lines[b.lines.length - 1].trim()) b.lines.pop();
       if (!b.name && !b.lines.length) continue;
-      html += `<section class="blk k-${b.name ? sectionKind(b.name) : 'none'}">`;
+      html += `<section class="blk k-${b.name ? (b.own ? 'own' : sectionKind(b.name)) : 'none'}"${b.own ? ` style="--k:hsl(${hueOf(b.name)} 68% 52%)"` : ''}>`;
       if (b.name) html += `<div class="blk-label">${esc(b.name)}</div>`;
       for (const line of b.lines) html += renderLine(line, o);
       html += '</section>';
@@ -1443,7 +1444,7 @@
   const CHORD_GROUPS = () => [
     { label: 'Chords', sets: [{ items: ['1', '2', '3', '4', '5', '6', '7'] }, { items: [...new Set([...language.custom.map((c) => c.name).filter(Boolean), 'b7', 'b3', 'b6', '#4'])] }] },
     { label: 'Bass', sets: [{ items: ['5/4', '1/5', '4/1', '1/3', '4/5', '5/7', '2/5', '6/5', 'b7/5'] }, { kind: 'sym', items: ['[ ]', '♭', '♯', 'm', '7', 'maj7', 'sus4', 'add9', '+', '°', '/'] }] },
-    { label: 'Parts', sets: [{ kind: 'sec', items: ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Tag', 'Turnaround', 'Interlude', 'Instrumental', 'Refrain', 'Vamp', 'Outro', 'Ending'] }] },
+    { label: 'Parts', sets: [{ kind: 'own', items: ['<Your own>'] }, { kind: 'sec', items: ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Tag', 'Turnaround', 'Interlude', 'Instrumental', 'Refrain', 'Vamp', 'Outro', 'Ending'] }] },
   ];
 
   function viewEditor(id) {
@@ -1489,7 +1490,8 @@
             </div>
             <div class="offer" id="lyricsOffer" hidden></div>
             <div class="chordbar" id="cbar">
-              ${CHORD_GROUPS().map((g) => `<div class="cb-group"><span class="cb-label">${g.label}</span><div class="cb-row">${g.sets.map((st) => st.items.map((x) => st.kind === 'sec'
+              ${CHORD_GROUPS().map((g) => `<div class="cb-group"><span class="cb-label">${g.label}</span><div class="cb-row">${g.sets.map((st) => st.items.map((x) => st.kind === 'own' ? `<button type="button" class="secb own" data-own="1" title="Make your own section, e.g. &lt;Way Maker&gt;">${esc(x)}</button>`
+                : st.kind === 'sec'
                 ? `<button type="button" class="secb" data-sec="${esc(x)}">${esc(x)}</button>`
                 : st.kind === 'sym' ? `<button type="button" class="symb" data-ins="${esc(x)}" title="Type ${esc(x)}">${esc(x)}</button>`
                 : `<button type="button" data-ins="[${esc(x)}]">${esc(prettyName(x))}</button>`).join('')).join('<i class="cb-sep"></i>')}</div></div>`).join('')}
@@ -1589,6 +1591,13 @@ Jesus is the answer</pre>
       const start = ta.selectionStart, end = ta.selectionEnd;
       let ins = b.dataset.ins;
       if (ins === '[ ]') ins = '[]', b.dataset.back = '1'; else delete b.dataset.back;
+      if (b.dataset.own) {
+        const before = ta.value[start - 1], after = ta.value[end];
+        const lead = before && before !== '\n' ? '\n' : '';
+        ta.setRangeText(lead + '<>' + (after && after !== '\n' ? '\n' : ''), start, end, 'end');
+        const at = start + lead.length + 1;
+        ta.setSelectionRange(at, at); ta.focus(); draw(); return;
+      }
       if (b.dataset.sec) {
         // A heading needs its own line, but no blank lines around it.
         const before = ta.value[start - 1], after = ta.value[end];

@@ -836,3 +836,6 @@ dialog.photo-modal { width: min(560px, calc(100vw - 16px)); }
 .chordbar.closed .cb-group { display: none; }
 .chordbar.closed { min-height: 36px; }
 .chordbar .cb-sep { flex: 0 0 1px; align-self: stretch; margin: 2px 3px; background: var(--line); }
+.blk.k-own { --k: var(--other); }
+.blk.k-own:not(.k-none) { background: linear-gradient(90deg, color-mix(in srgb, var(--k) 14%, transparent), color-mix(in srgb, var(--k) 4%, transparent) 70%, transparent); }
+.chordbar button.own { border: 1.5px dashed var(--primary); }

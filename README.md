@@ -68,7 +68,7 @@ Keyboard: Space = scroll, ←/→ = next/previous song in a setlist, M = metrono
 - The band's chord language: a plain 2, 3 or 6 is minor, 7 is diminished, and special names such as 4m, 1♯ (6 made major), 4♯ (2 made major), 5♯ (3 made major) and 6♯ (2 with a raised 5th) are set in Settings → Chord language (password-locked, shared with the team).
 - Numbers `1`–`7`, with `m`, `7`, `sus4`, `+`/`aug`, `°`/`dim` and so on. Flats and sharps go before or after the number (`♭7`, `6♭`, `5♯`). Typing `flat` or `sharp` turns into ♭ / ♯. Use a slash for the bass note (`1/5`, `♭7/5`).
 - Letter chords (`G`, `C/E`) are converted to numbers using the song key when you save.
-- Section lines: `Verse 1`, `Chorus`, `Bridge`, `{Anything}`. A line starting with `#` is a note.
+- Section lines: `Verse 1`, `Chorus`, `Bridge`, `{Anything}`, or your own in angle brackets such as `<Way Maker>` (each gets its own colour, like a verse or chorus). A line starting with `#` is a note.
 
 ## Files
 
