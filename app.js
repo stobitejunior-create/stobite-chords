@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 33; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 34; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -138,8 +138,6 @@
 
   /* ================= music theory ================= */
   const NOTE_SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-  const SHARPS = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
-  const FLATS = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
   const DEGREE_SEMI = { 1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11 };
   const SEMI_DEGREE = ['1', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
   // Chromatic sol-fa by semitone above "do": do de re ma mi fa fi so zi la ta ti
@@ -272,7 +270,6 @@
     else if (!p.acc && sameQual(qual, implied)) shown = '';
     return { acc: p.acc, post: p.post, deg: p.deg, qual, shown, label: null, custom: false, bass: bass || p.bass };
   }
-  const parseAny = resolveChord;
 
   function degName(acc, deg, post, mode, key) {
     if (mode === 'solfa') return solfaOf(numSemi(acc, deg));
@@ -2135,7 +2132,6 @@ Jesus is the answer</pre>
   async function pushArtists() {
     if (!team || !sync.client || sync.noArtists || !sync.pulled) return;
     try {
-      const now = Date.now();
       const dirty = artists.filter((a) => { const m = synced.artists[a.id]; return !m || m.d || (a.updated || 0) > m.u; });
       const toRow = (a) => { const r = artistToRow(a); if (sync.noRemovedSrc && r.src === 'removed') r.src = ''; return r; };
       const real = dirty.filter((a) => !a.derived).map(toRow);
@@ -2217,7 +2213,6 @@ Jesus is the answer</pre>
     try {
       do {
         sync.again = false;
-        const now = Date.now();
         const songRows = songs.filter((x) => { const m = synced.songs[x.id]; return !m || m.d || (x.updated || 0) > m.u; }).map(songToRow);
         // Deletions: ONLY what you deleted on purpose, sent with all its words (a missing song is never read as a deletion).
         for (const t of trash.songs) if (!t.sent) songRows.push({ ...songToRow(t.item), updated: Math.max(t.at, ((synced.songs[t.item.id] || {}).u || 0) + 1), deleted: true });
@@ -3026,14 +3021,6 @@ Jesus is the answer</pre>
     if (!a) return `<span class="av ${extra}"><span class="kl">${keyLabel(s)}</span></span>`;
     const img = a.photo ? `<img class="pimg" src="${esc(a.photo)}" alt="" onerror="this.parentNode.classList.remove('pic');this.remove()">` : '';
     return `<span class="av ${extra}${img ? ' pic' : ''}" data-artist="${esc(a.id)}">${img}<span class="kl">${keyLabel(s)}</span></span>`;
-  }
-  function paintAv(el, url) {
-    if (!url) return;
-    let img = el.querySelector('.pimg');
-    if (!img) { img = document.createElement('img'); img.className = 'pimg'; img.alt = ''; img.onerror = () => { el.classList.remove('pic'); img.remove(); }; el.prepend(img); }
-    img.src = url;
-    el.classList.add('pic');
-    if (el.classList.contains('hero-av')) el.closest('.hero')?.classList.add('has-pic');
   }
 
   /** Any image (file or URL) -> a small square JPEG data URL, so it is light and works offline. */
