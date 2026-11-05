@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 34; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 35; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1387,7 +1387,7 @@
       <p>Pick songs for “${esc(set.name)}”.</p>
       <div class="searchbar sm">${icon('search')}<input type="search" id="pq" placeholder="Search songs…" autocomplete="off"></div>
       <div class="pick-list" id="pl"></div>
-      <div class="row"><form method="dialog"><button class="btn ghost">Cancel</button></form><button class="btn primary" id="pAdd" disabled>Add</button></div>`);
+      <div class="row"><form method="dialog"><button class="btn ghost" autofocus>Cancel</button></form><button class="btn primary" id="pAdd" disabled>Add</button></div>`); // autofocus on Cancel keeps the phone keyboard closed until the search box is tapped
     const draw = () => {
       const q = $('#pq', d).value.trim().toLowerCase();
       $('#pl', d).innerHTML = [...songs].sort((a, b) => a.title.localeCompare(b.title))
