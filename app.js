@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 35; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 36; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1351,7 +1351,7 @@
           <span class="num">${i + 1}</span>
           <a class="si-body" href="#/set/${enc(set.id)}/${i}"><b>${esc(s.title)}</b><small>${esc(s.artist || '')}${s.tempo ? ` · ${esc(s.tempo)} bpm` : ''}</small></a>
           ${k ? `<select class="si-key" data-key="${i}" aria-label="Key for this service">${opts.map((x) =>
-            `<option value="${x === s.key ? '' : esc(x)}"${(it.key || s.key) === x ? ' selected' : ''}>${esc(prettyKey(x))}${x === s.key ? ' ★' : ''}</option>`).join('')}</select>` : ''}
+            `<option value="${x === s.key ? '' : esc(x)}"${(it.key || s.key) === x ? ' selected' : ''}>${esc(prettyKey(x))}</option>`).join('')}</select>` : ''}
           <div class="si-btns">
             <button data-mv="${i}" data-d="-1" title="Move up" ${i === 0 ? 'disabled' : ''}>${icon('up')}</button>
             <button data-mv="${i}" data-d="1" title="Move down" ${i === n - 1 ? 'disabled' : ''}>${icon('down')}</button>
