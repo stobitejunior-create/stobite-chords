@@ -843,3 +843,6 @@ dialog.photo-modal { width: min(560px, calc(100vw - 16px)); }
 .feat-chips:empty { display: none; }
 .feat-chips .chip { display: inline-flex; align-items: center; gap: 6px; }
 .feat-chips .chip button { appearance: none; border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1; padding: 0 2px; cursor: pointer; }
+
+/* MultiTracks paste steps */
+ol.steps { margin: 6px 0 12px; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; color: var(--ink-2, inherit); }

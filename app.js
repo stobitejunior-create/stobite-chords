@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 40; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 41; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -424,7 +424,7 @@
   }
 
   /* ================= chart parsing ================= */
-  const SECTION_RE = /^\s*(?:\{\s*(.+?)\s*\}|((?:verse|chorus|pre-?chorus|bridge|intro|outro|tag|ending|interlude|refrain|coda|vamp|instrumental|hook|turnaround)(?:\s*\d+)?(?:\s*\(.*\))?)\s*:?|<\s*([^<>]+?)\s*>)\s*$/i;
+  const SECTION_RE = /^\s*(?:\{\s*(.+?)\s*\}|((?:verse|chorus|pre[- ]?chorus|post[- ]?chorus|bridge|intro|outro|tag|ending|interlude|refrain|coda|vamp|instrumental|hook|turnaround|breakdown)(?:\s*\d+)?(?:\s*\(.*\))?)\s*:?|<\s*([^<>]+?)\s*>)\s*$/i;
   const FILLER_RE = /^(?:\|+|-|\/|%|x\d+|\(x\d+\)|N\.?C\.?)$/i;
   const isChordTok = (t) => !!(parseNum(t) || parseLetter(t) || customFor(splitBass(normTok(t))[0]));
 
@@ -482,7 +482,7 @@
   const sectionKnown = (name) => /verse|chorus|hook|bridge|refrain|pre-?chorus/i.test(name);
   function sectionKind(name) {
     const n = name.toLowerCase();
-    if (/pre-?chorus/.test(n)) return 'pre';
+    if (/pre[- ]?chorus/.test(n)) return 'pre';
     if (/refrain/.test(n)) return 'refrain';
     if (/chorus|hook/.test(n)) return 'chorus';
     if (/bridge/.test(n)) return 'bridge';
@@ -1488,6 +1488,7 @@
             <div class="pane-h"><h2>Lyrics &amp; chords</h2><button type="button" class="link" id="helpBtn">How to write chords</button></div>
             <div class="get-lyrics">
               <button type="button" class="btn soft" id="findBtn">${icon('globe')}Find lyrics online</button>
+              <button type="button" class="btn soft" id="mtBtn" title="Copy a song page from MultiTracks: exact key, tempo, time and the lyrics in their parts">${icon('music')}From MultiTracks</button>
             </div>
             <div class="chordbar" id="cbar">
               ${CHORD_GROUPS().map((g) => `<div class="cb-group"><span class="cb-label">${g.label}</span><div class="cb-row">${g.sets.map((st) => st.items.map((x) => st.kind === 'own' ? `<button type="button" class="secb own" data-own="1" title="Make your own section, e.g. &lt;Way Maker&gt;">${esc(x)}</button>`
@@ -1696,7 +1697,8 @@ Jesus is the answer</pre>
     let t = String(name || '').trim();
     const feat = [];
     t = t.replace(/\s*[([]\s*(?:feat\.?|ft\.?|featuring)\s+([^)\]]+)[)\]]/gi, (m, f) => { feat.push(...f.split(/\s*(?:,|&|\band\b)\s*/).map((x) => x.trim()).filter(Boolean)); return ''; });
-    t = t.replace(/\s*[([]\s*(?:official|audio|lyrics?|lyric video|live|with chords|lyrics and chords|intro|video)[^)\]]*[)\]]/gi, '');
+    t = t.replace(/\s*[([]\s*(?:official|audio|lyrics?|lyric video|live|with chords|lyrics and chords|intro|video|acoustic|radio|single|remaster|stripped|demo|apple music|spotify|amazon|deluxe|bonus|edit\b|[^)\]]*\b(?:sessions?|version|mix|edit)\s*[)\]])[^)\]]*[)\]]/gi, '');
+    t = t.replace(/\s+[-–]\s+(?:live|acoustic|radio edit|single version|remaster(?:ed)?|[^-–]*\b(?:version|session|mix))\b.*$/i, '');
     t = t.replace(/\s*[([]\s*\d{4}[_-].*?[)\]]/g, '').replace(/\s*[([][^)\]]*album version[)\]]/gi, '').replace(/\s+[-–]\s+[^-–]*album version$/i, '').replace(/\s+lyrics\s*(?:&|and)\s*chords$/i, '');
     const pre = normName(artist);
     if (normName(t).startsWith(pre + ' - ')) t = t.slice(pre.length + 3);
@@ -1704,19 +1706,42 @@ Jesus is the answer</pre>
     return { title: t.replace(/\s+/g, ' ').trim(), feat };
   }
 
+  /** The artist's real releases from the Apple Music catalogue (one entry per song, the studio version when there is one). */
   async function artistTracks(artist) {
     const who = artistQuery(artist), want = normName(who);
-    const queries = [who, `${who} the`, `${who} lord`, `${who} jesus`, `${who} love`]; // the service returns only 20 per search, so ask a few ways
-    const lists = await Promise.all(queries.map((q) => fetch('https://lrclib.net/api/search?q=' + enc(q)).then((r) => (r.ok ? r.json() : [])).catch(() => [])));
+    const it = (u) => fetch(u).then((r) => (r.ok ? r.json() : {})).then((d) => d.results || []).catch(() => []);
+    const ids = (await it(`https://itunes.apple.com/search?entity=musicArtist&limit=10&term=${enc(who)}`))
+      .filter((x) => normName(x.artistName) === want).map((x) => x.artistId).slice(0, 2);
+    const lists = await Promise.all([
+      ...ids.map((id) => it(`https://itunes.apple.com/lookup?id=${id}&entity=song&limit=200`)),
+      it(`https://itunes.apple.com/search?entity=song&attribute=artistTerm&limit=200&term=${enc(who)}`),
+    ]);
     const out = new Map();
     for (const x of lists.flat()) {
-      if (!x.plainLyrics || x.plainLyrics.trim().length < 20 || !normName(x.artistName).includes(want)) continue;
+      if (x.wrapperType !== 'track' || x.kind !== 'song' || /instrumental|karaoke|backing track|accompaniment|performance track|split track|demonstration/i.test(`${x.trackName} ${x.collectionName}`)) continue;
       const { title, feat } = cleanTrack(x.trackName, who);
-      const k = normName(title);
-      if (!k || out.has(k)) continue;
-      out.set(k, { title, feat, album: x.albumName || '', text: x.plainLyrics });
+      // "Chris Tomlin & Pat Barrett" -> Chris Tomlin ft. Pat Barrett; a song where they're only featured stays under its own artist
+      const credit = x.artistName.split(/\s*(?:,|&|\band\b)\s*/).map((n) => n.trim()).filter(Boolean);
+      if (!credit.some((n) => normName(n) === want) && !normName(x.artistName).includes(want) && !feat.some((n) => normName(n) === want)) continue;
+      const main = credit.length > 1 && credit.some((n) => normName(n) === want) ? credit[0] : x.artistName;
+      const k = plainTitle(title);
+      if (!k) continue;
+      const item = { title, main, feat: [...new Set([...credit.slice(main === credit[0] ? 1 : credit.length), ...feat])], album: (x.collectionName || '').replace(/\s+-\s+(Single|EP)$/i, ''), year: (x.releaseDate || '').slice(0, 4), secs: Math.round((x.trackTimeMillis || 0) / 1000), alt: NOT_STUDIO.test(`${x.trackName} ${x.collectionName}`) };
+      const had = out.get(k);
+      if (!had || (had.alt && !item.alt) || (had.alt === item.alt && item.year && item.year < had.year)) out.set(k, item); // studio first, then the first release
     }
     return [...out.values()].sort((p, q) => p.title.localeCompare(q.title));
+  }
+
+  /** Lyrics for that exact recording (same artist, title and length), or '' when the lyrics service hasn't got it. */
+  async function lyricsFor(x) {
+    const ask = (path, q) => fetch(`https://lrclib.net/api/${path}?` + new URLSearchParams(q)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const exact = await ask('get', { artist_name: x.main, track_name: x.title, album_name: x.album, duration: x.secs });
+    if (exact && exact.plainLyrics) return exact.plainLyrics;
+    const list = (await ask('search', { artist_name: artistQuery(x.main), track_name: x.title })) || [];
+    const best = list.filter((y) => y.plainLyrics && plainTitle(cleanTrack(y.trackName, x.main).title) === plainTitle(x.title) && !/instrumental/i.test(y.trackName))
+      .sort((a, b) => (NOT_STUDIO.test(a.trackName + ' ' + a.albumName) - NOT_STUDIO.test(b.trackName + ' ' + b.albumName)) || Math.abs((a.duration || 0) - x.secs) - Math.abs((b.duration || 0) - x.secs));
+    return best[0] ? best[0].plainLyrics : '';
   }
 
   function openArtistSongs(a) {
@@ -1725,36 +1750,53 @@ Jesus is the answer</pre>
       <p class="sub" id="afNote">Looking for songs…</p>
       <div class="pick-list" id="afList"></div>
       <div class="row"><form method="dialog"><button class="btn ghost" autofocus>Close</button></form><button class="btn primary" id="afAdd" disabled>Add</button></div>`);
-    const have = (t) => songs.some((x) => normName(x.title) === normName(t));
-    let found = [];
+    const have = (t) => songs.some((x) => plainTitle(x.title) === plainTitle(t));
+    let found = [], busy = false;
     const chosen = new Set();
     const refresh = () => {
       const b = $('#afAdd', d), n = [...chosen].filter((i) => !have(found[i].title)).length;
-      b.disabled = !chosen.size;
-      b.textContent = n ? `Add ${n} song${n > 1 ? 's' : ''}` : 'Add';
+      b.disabled = !chosen.size || busy;
+      if (!busy) b.textContent = n ? `Add ${n} song${n > 1 ? 's' : ''}` : 'Add';
     };
     artistTracks(a.name).then((list) => {
       found = list;
       const newOnes = list.filter((x) => !have(x.title)).length;
       $('#afNote', d).textContent = list.length
-        ? `${list.length} found (${list.length - newOnes} already in your library). Tick the ones to add. Songs you already have are never changed. Lyrics only: add the chords yourself.`
-        : 'No songs found. Try again later, or check the artist’s spelling.';
+        ? `${list.length} songs from Apple Music (${list.length - newOnes} already in your library). Tick the ones to add. Songs you already have are never changed. The lyrics come with them; add the key, tempo and chords yourself, or use From MultiTracks in the song.`
+        : 'No songs found. Check the artist’s spelling, or try again later.';
       $('#afList', d).innerHTML = list.map((x, i) => `<label class="pick-row" style="--h:${hueOf(x.title)}"><input type="checkbox" value="${i}">
-        <span class="av">${icon('music')}</span><span><b>${esc(x.title)}</b><small>${esc(x.album)}${x.feat.length ? ` · ft. ${esc(x.feat.join(', '))}` : ''}</small></span>${have(x.title) ? '<em>In library</em>' : ''}</label>`).join('');
-    }).catch(() => { $('#afNote', d).textContent = 'Couldn’t reach the lyrics service. Check your connection and try again.'; });
+        <span class="av">${icon('music')}</span><span><b>${esc(x.title)}</b><small>${[normName(x.main) !== normName(a.name) ? esc(x.main) : '', esc(x.album), x.year, x.feat.length ? 'ft. ' + esc(x.feat.join(', ')) : ''].filter(Boolean).join(' · ')}</small></span>${have(x.title) ? '<em>In library</em>' : ''}</label>`).join('');
+    }).catch(() => { $('#afNote', d).textContent = 'Couldn’t reach Apple Music. Check your connection and try again.'; });
     $('#afList', d).addEventListener('change', (e) => { if (e.target.checked) chosen.add(+e.target.value); else chosen.delete(+e.target.value); refresh(); });
-    $('#afAdd', d).addEventListener('click', () => {
+    $('#afAdd', d).addEventListener('click', async () => {
+      const todo = [...chosen].map((i) => found[i]).filter((x) => !have(x.title));
+      const kept = chosen.size - todo.length;
+      busy = true; refresh();
+      const btn = $('#afAdd', d);
+      let done = 0;
+      const texts = new Array(todo.length);
+      let next = 0;
+      const worker = async () => { // four at a time, so the lyrics service isn't flooded
+        while (next < todo.length) {
+          const i = next++;
+          texts[i] = await lyricsFor(todo[i]).catch(() => '');
+          btn.textContent = `Getting lyrics ${++done} of ${todo.length}…`;
+        }
+      };
+      await Promise.all([1, 2, 3, 4].map(worker));
       const now = Date.now();
-      let added = 0, kept = 0;
-      for (const i of chosen) {
-        const x = found[i];
-        if (have(x.title)) { kept++; continue; } // already in the library: never overwritten
-        songs.push({ id: uid(), title: x.title, artist: a.name, featuring: x.feat.filter((n) => normName(n) !== normName(a.name)).join('|'), key: 'C', tempo: '', time: '4/4', info: '', tags: ['Needs chords'], chart: structureLyrics(x.text), updated: now + added });
+      let added = 0, noWords = 0;
+      todo.forEach((x, i) => {
+        if (have(x.title)) return; // added from another phone meanwhile: still never overwritten
+        const text = texts[i] || '';
+        if (!text) noWords++;
+        songs.push({ id: uid(), title: x.title, artist: x.main, featuring: [...(normName(x.main) !== normName(a.name) ? [a.name] : []), ...x.feat].filter((n, k, all) => normName(n) !== normName(x.main) && all.findIndex((m) => normName(m) === normName(n)) === k).join('|'),
+          key: 'C', tempo: '', time: '4/4', info: '', tags: text ? ['Needs chords'] : ['Needs lyrics', 'Needs chords'], chart: text ? structureLyrics(text) : '', updated: now + added });
         added++;
-      }
+      });
       if (added) { ensureArtists(); saveLibrary(); }
       d.close();
-      toast(`${added ? `Added ${added} song${added > 1 ? 's' : ''} (tagged Needs chords)` : 'Nothing new to add'}${kept ? ` · ${kept} already in your library, left as they were` : ''}`);
+      toast(`${added ? `Added ${added} song${added > 1 ? 's' : ''}` : 'Nothing new to add'}${noWords ? ` (${noWords} without lyrics: tagged Needs lyrics)` : ''}${kept ? ` · ${kept} already in your library, left as they were` : ''}`);
       viewArtist(a.id);
     });
   }
@@ -3521,41 +3563,173 @@ Jesus is the answer</pre>
 
   // ---------- finding lyrics on the internet ----------
   const stanzaNorm = (x) => x.replace(/\[[^\]]*\]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  /** Plain lyrics -> Verse / Chorus sections (a stanza that repeats is called Chorus). Editable afterwards. */
+  /** Plain lyrics -> Intro / Verse / Pre-Chorus / Chorus / Bridge / Tag, by spotting which stanzas come back and where. */
   function structureLyrics(text) {
     const out = [];
     let labelled = false;
     for (const l of String(text).replace(/\r/g, '').split('\n').map((x) => x.replace(/\s+$/, ''))) {
       const m = /^\s*\[(.+?)\]\s*$/.exec(l);
       if (m) { if (SECTION_RE.test(m[1])) { labelled = true; out.push('', m[1]); } continue; } // "[Chorus]" becomes a heading; "[Singer name]" is dropped
+      if (SECTION_RE.test(l)) labelled = true;
       out.push(l);
     }
     const joined = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    if (labelled) return joined;
-    const stanzas = joined.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
-    const counts = new Map();
-    stanzas.forEach((x) => counts.set(stanzaNorm(x), (counts.get(stanzaNorm(x)) || 0) + 1));
-    let v = 0;
-    return stanzas.map((x) => `${counts.get(stanzaNorm(x)) > 1 ? 'Chorus' : 'Verse ' + ++v}\n${x}`).join('\n\n');
+    if (labelled || !joined) return joined;
+    // lines compared loosely: ad-libs in brackets ignored, "And You're a good Father" = "You're a good Father"
+    const words = (l) => stanzaNorm(l.replace(/\([^)]*\)/g, ' ')).split(' ').filter(Boolean);
+    const lineEq = (a, b) => {
+      if (!a || !b || !a.length || !b.length) return false;
+      const A = a.join(' '), B = b.join(' ');
+      if (A === B) return true;
+      const [s, l] = A.length < B.length ? [A, B] : [B, A];
+      if (s.split(' ').length >= 3 && (' ' + l + ' ').includes(' ' + s + ' ')) return true;
+      const sa = new Set(a), sb = new Set(b);
+      let n = 0; for (const w of sa) if (sb.has(w)) n++;
+      return Math.min(sa.size, sb.size) >= 4 && n / (sa.size + sb.size - n) >= 0.66;
+    };
+    // lyrics with no blank lines: cut where a run of lines that comes back starts or ends
+    const splitRuns = (block) => {
+      const L = block.split('\n'), W = L.map(words), cut = new Set();
+      for (let i = 1; i < L.length - 1; i++) for (let j = 0; j < i; j++) {
+        if (!lineEq(W[i], W[j]) || !lineEq(W[i + 1], W[j + 1]) || (j > 0 && lineEq(W[i - 1], W[j - 1]))) continue;
+        let k = 0; while (i + k < L.length && j + k < i && lineEq(W[i + k], W[j + k])) k++;
+        if (k >= 3) [i, j, i + k, j + k].forEach((c) => cut.add(c));
+      }
+      const at = [...cut].filter((c) => c > 0 && c < L.length).sort((a, b) => a - b);
+      const parts = [];
+      [0, ...at].forEach((c, n) => { const seg = L.slice(c, at[n] ?? L.length); if (seg.length === 1 && parts.length) parts[parts.length - 1].push(...seg); else parts.push(seg); });
+      return parts.flatMap((seg) => { const r = []; for (let c = 0; c < seg.length; c += seg.length > 10 ? 4 : seg.length) r.push(seg.slice(c, c + (seg.length > 10 ? 4 : seg.length)).join('\n')); return r; });
+    };
+    const st = joined.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean).flatMap((x) => (x.split('\n').length > 12 ? splitRuns(x) : [x]));
+    const lines = st.map((x) => x.split('\n').map(words).filter((w) => w.length));
+    const alike = (i, j) => {
+      const a = lines[i], b = lines[j];
+      if (!a.length || !b.length || Math.min(a.length, b.length) < 2) return stanzaNorm(st[i]) === stanzaNorm(st[j]);
+      let n = 0; for (const x of a) if (b.some((y) => lineEq(x, y))) n++;
+      return n / Math.min(a.length, b.length) >= 0.75 && n / Math.max(a.length, b.length) >= 0.6;
+    };
+    // group stanzas that are the same part sung again
+    const grp = st.map((_, i) => i);
+    for (let i = 0; i < st.length; i++) for (let j = 0; j < i; j++) if (grp[i] === i && alike(i, j)) { grp[i] = grp[j]; break; }
+    const occ = new Map();
+    grp.forEach((g, i) => occ.set(g, [...(occ.get(g) || []), i]));
+    const rep = [...occ.keys()].filter((g) => occ.get(g).length > 1);
+    const leads = (x, y) => { const o = occ.get(x), n = o.filter((i) => grp[i + 1] === y).length; return grp[o[0] + 1] === y && n * 2 >= o.length; };
+    let chorus = -1;
+    if (rep.length) {
+      // the chorus comes back word for word; a verse tune comes back with new words
+      const same = (i, j) => stanzaNorm(st[i].replace(/\([^)]*\)/g, ' ')) === stanzaNorm(st[j].replace(/\([^)]*\)/g, ' '));
+      const score = (g) => occ.get(g).reduce((t, i) => t + (occ.get(g).some((j) => j !== i && same(i, j)) ? 1 : 0.5), 0);
+      const most = Math.max(...rep.map(score));
+      const top = rep.filter((g) => score(g) === most);
+      chorus = top.find((g) => !top.some((h) => h !== g && leads(g, h))) ?? top[0];
+      // the part sung most often but only arriving late (after an earlier part already came back) is the bridge
+      const first = occ.get(chorus)[0];
+      const early = first >= 4 && rep.find((g) => g !== chorus && occ.get(g)[1] < first);
+      if (early !== undefined && early !== false) chorus = early;
+    }
+    const tiny = (i) => st.length > 2 && (!lines[i].length || st[i].split('\n').every((l) => /^\s*\(.*\)\s*$/.test(l)) || (lines[i].length <= 2 && lines[i].every((w) => w.length <= 3)));
+    const chorusAt = chorus < 0 ? [] : occ.get(chorus);
+    const lastChorus = chorusAt.length ? Math.max(...rep.map((g) => Math.max(...occ.get(g)))) : -1; // the last time anything repeated was sung
+    // how many times the chorus (with its pre-chorus) has gone round before stanza i
+    const pre = new Set();
+    const rounds = (i) => { let n = 0; for (let k = 0; k < i; k++) if (grp[k] === chorus || (pre.has(grp[k]) && grp[k + 1] !== chorus)) n++; return n; };
+    // a pre-chorus leads into the chorus and is there from early on (one that only turns up late is part of the bridge)
+    rep.forEach((g) => { if (g !== chorus && chorus >= 0 && leads(g, chorus) && rounds(occ.get(g)[0]) < 2) pre.add(g); });
+    // straight after every chorus, never sung twice in a row: the chorus's second half (bridges get repeated back to back)
+    const after = (g) => chorus >= 0 && occ.get(g).every((i) => grp[i - 1] === chorus) && !occ.get(g).some((i) => grp[i + 1] === g);
+    const bridge = (i) => (/^Bridge/.test(labels[i - 1] || '') ? labels[i - 1] : ++count.Bridge > 1 ? `Bridge ${count.Bridge}` : 'Bridge');
+    const name = new Map();
+    const count = { Verse: 0, Bridge: 0, 'Chorus 2': 0 };
+    const verseLens = [];
+    const labels = [];
+    st.forEach((_, i) => {
+      const g = grp[i];
+      if (name.has(g)) { labels.push(name.get(g)); return; }
+      const before = rounds(i), n = lines[i].length;
+      const nextIsChorusish = i + 1 < st.length && (grp[i + 1] === chorus || pre.has(grp[i + 1]));
+      let lab;
+      if (i > 0 && occ.get(g).length === 1 && lineEq(lines[i][0], lines[i - 1][0]) && !/^(Chorus|Pre)/.test(labels[i - 1])) lab = labels[i - 1]; // carries straight on from the stanza before
+      else if (tiny(i) && occ.get(g).length === 1) lab = i === 0 ? 'Intro' : i === st.length - 1 ? 'Ending' : lastChorus >= 0 && i > lastChorus ? 'Tag' : 'Interlude';
+      else if (g === chorus) lab = 'Chorus';
+      else if (occ.get(g).length > 1) {
+        if (pre.has(g)) lab = 'Pre-Chorus';
+        else if (after(g)) lab = n <= 3 ? 'Tag' : (count['Chorus 2']++ ? 'Chorus 3' : 'Chorus 2');
+        else if (before >= 2) lab = bridge(i);
+        else lab = before === 0 || occ.get(g).some((k) => grp[k + 1] === chorus) ? 'Verse' : 'Refrain';
+      } else if (n <= 2 && before >= 1 && (i > lastChorus || grp[i + 1] === chorus)) lab = i === st.length - 1 && i - 1 > lastChorus ? 'Ending' : 'Tag';
+      else if (lastChorus >= 0 && i > lastChorus && n <= 4) lab = i === st.length - 1 && labels[i - 1] === 'Tag' ? 'Ending' : 'Tag';
+      else if (chorus < 0 || before < 2) lab = 'Verse';
+      else {
+        // after two choruses: a new stanza that leads back into the chorus and is verse-sized is another verse, else the bridge
+        const avg = verseLens.length ? verseLens.reduce((a, b) => a + b, 0) / verseLens.length : n;
+        lab = nextIsChorusish && (Math.abs(n - avg) <= 1 || count.Bridge > 0) ? 'Verse' : bridge(i);
+      }
+      if (lab === 'Verse') { lab = `Verse ${++count.Verse}`; verseLens.push(n); }
+      if (occ.get(g).length > 1) name.set(g, lab);
+      labels.push(lab);
+    });
+    return st.map((x, i) => `${labels[i]}\n${x}`).join('\n\n');
   }
 
+  /** Text copied from a MultiTracks song page -> title, artist, key, tempo, time and the lyrics with their part names. */
+  function parseMultiTracks(text) {
+    const L = String(text || '').replace(/\r/g, '').split('\n').map((x) => x.trim());
+    const meta = L.join(' '), out = {};
+    const k = /\bKey:\s*([A-G](?:#|b|♯|♭)?)(m(?:in(?:or)?)?)?(?![a-z])/.exec(meta);
+    if (k) {
+      const root = k[1].replace('♯', '#').replace('♭', 'b');
+      out.key = { Db: 'C#', 'D#': 'Eb', Gb: 'F#', 'G#': 'Ab', 'A#': 'Bb', Cb: 'B', 'E#': 'F', Fb: 'E', 'B#': 'C' }[root] || root;
+      out.minor = !!k[2];
+    }
+    const b = /\bBPM:\s*(\d+(?:\.\d+)?)/i.exec(meta);
+    if (b && +b[1] >= 20 && +b[1] <= 300) out.tempo = String(Math.round(+b[1]));
+    const t = /\bTime Sig(?:nature)?:\s*(\d{1,2}\/\d{1,2})/i.exec(meta);
+    if (t) out.time = t[1];
+    // the song name sits above "Artist - Album", just over the Key line
+    const ki = L.findIndex((x) => /^Key:\s*[A-G]/.test(x));
+    if (ki > 0) {
+      const above = L.slice(0, ki).filter(Boolean), by = above.pop(), name = above.pop();
+      if (by && name && / - /.test(by) && name.length < 80) { out.title = name; out.artist = by.split(' - ')[0].trim(); }
+    }
+    const li = L.findIndex((x) => /^lyrics$/i.test(x));
+    let body = li >= 0 ? L.slice(li + 1) : L.some((x) => SECTION_RE.test(x)) ? L : [];
+    const stop = body.findIndex((x) => /^(preview|view all|view less|show more|show less|song map)$/i.test(x));
+    if (stop >= 0) body = body.slice(0, stop);
+    const res = [];
+    for (const x of body) {
+      if (!x) continue;
+      if (SECTION_RE.test(x)) res.push('', x.replace(/^pre\s+chorus/i, 'Pre-Chorus').replace(/^post\s+chorus/i, 'Post-Chorus'));
+      else res.push(x);
+    }
+    out.lyrics = res.join('\n').trim();
+    out.parts = res.filter((x) => x && SECTION_RE.test(x)).length;
+    if (!out.parts) out.lyrics = '';
+    return out;
+  }
+
+  const plainTitle = (t) => normName(String(t || '').replace(/\s*[([][^)\]]*[)\]]/g, ' ').replace(/\s+-\s+.*$/, ''));
+  const NOT_STUDIO = /\blive\b|acoustic|instrumental|karaoke|remix|cover|sped up|slowed|reprise|demo|session/i;
   async function lyricsLookup(title, artist) {
-    const found = [];
-    const add = (t, a, album, text) => { if (text && text.trim().length > 20) found.push({ title: t, artist: a, album: album || '', text }); };
-    try {
-      const q = new URLSearchParams({ track_name: title }); if (artist) q.set('artist_name', artist);
-      const r = await fetch('https://lrclib.net/api/search?' + q);
-      if (r.ok) for (const x of await r.json()) add(x.trackName, x.artistName, x.albumName, x.plainLyrics);
-    } catch { /* try the backup below */ }
-    if (!found.length && artist) {
+    const who = artistQuery(artist);
+    const ask = (q) => fetch('https://lrclib.net/api/search?' + new URLSearchParams(q)).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+    const lists = await Promise.all([who ? ask({ track_name: title, artist_name: who }) : [], ask({ track_name: title }), who ? ask({ q: `${title} ${who}` }) : []]);
+    const found = lists.flat().filter((x) => x.plainLyrics && x.plainLyrics.trim().length > 20)
+      .map((x) => ({ title: x.trackName, artist: x.artistName, album: x.albumName || '', text: x.plainLyrics }));
+    if (!found.length && who) {
       try {
-        const r = await fetch(`https://api.lyrics.ovh/v1/${enc(artist)}/${enc(title)}`);
-        if (r.ok) add(title, artist, '', (await r.json()).lyrics);
+        const r = await fetch(`https://api.lyrics.ovh/v1/${enc(who)}/${enc(title)}`);
+        if (r.ok) { const t = (await r.json()).lyrics; if (t && t.trim().length > 20) found.push({ title, artist: who, album: '', text: t }); }
       } catch { /* nothing */ }
     }
-    const seen = new Set(), want = artist.toLowerCase();
-    return found.filter((x) => { const k = stanzaNorm(x.text).slice(0, 120); if (seen.has(k)) return false; seen.add(k); return true; })
-      .sort((a, b) => (b.artist.toLowerCase().includes(want) ? 1 : 0) - (a.artist.toLowerCase().includes(want) ? 1 : 0)).slice(0, 8);
+    // best first: the exact title, by the right artist, the studio recording (not live, acoustic or a cover)
+    const want = plainTitle(title), wa = normName(who);
+    const score = (x) => (plainTitle(x.title) === want ? 4 : plainTitle(x.title).includes(want) ? 1 : 0)
+      + (wa && normName(x.artist) === wa ? 4 : wa && normName(x.artist).includes(wa) ? 3 : 0)
+      - (NOT_STUDIO.test(`${x.title} ${x.album}`) ? 2 : 0);
+    found.sort((a, b) => score(b) - score(a));
+    const seen = new Set();
+    return found.filter((x) => { const k = stanzaNorm(x.text).slice(0, 120); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 8);
   }
 
   /** Everything the song editor needs for photos, lyric search, pictures and the YouTube helper. */
@@ -3608,12 +3782,43 @@ Jesus is the answer</pre>
         if (!b) return;
         const r = results[+b.dataset.i];
         d.close();
-        if (!f.artist.value.trim()) { f.artist.value = r.artist; f.artist.dispatchEvent(new Event('change')); }
+        if (!f.artist.value.trim()) { f.artist.value = r.artist; f.artist.dispatchEvent(new Event('fill')); }
         putLyrics(structureLyrics(r.text));
         toast('Lyrics added. Now add the chords.');
       });
     };
     $('#findBtn').addEventListener('click', findLyrics);
+
+    // MultiTracks: it won't let other apps read its pages, so the person copies the page and pastes it here
+    $('#mtBtn').addEventListener('click', () => {
+      const d = modal(`
+        <h2>From MultiTracks</h2>
+        <p>MultiTracks has the exact key, tempo, time signature and the lyrics with their parts. It doesn't let other apps read its pages, so copy it across:</p>
+        <ol class="steps"><li>Tap <b>Open MultiTracks</b> and open the song's page.</li><li>If there's a <b>View all</b> under the lyrics, tap it so the whole song shows.</li><li>Select the whole page, copy it, come back and paste it below.</li></ol>
+        <button type="button" class="btn soft" id="mtOpen">${icon('globe')}Open MultiTracks</button>
+        <textarea id="mtText" rows="6" placeholder="Paste the MultiTracks page here" style="margin-top:10px"></textarea>
+        <div class="row"><form method="dialog"><button class="btn ghost" autofocus>Cancel</button></form><button class="btn primary" id="mtUse">Use it</button></div>`);
+      $('#mtOpen', d).addEventListener('click', () => {
+        const q = [f.title.value.trim(), artistQuery(f.artist.value)].filter(Boolean).join(' ');
+        window.open(q ? 'https://www.google.com/search?q=' + enc(`${q} site:multitracks.com/songs`) : 'https://www.multitracks.com/songs/', '_blank', 'noopener');
+      });
+      $('#mtUse', d).addEventListener('click', () => {
+        const m = parseMultiTracks($('#mtText', d).value);
+        const got = [];
+        if (m.title && !f.title.value.trim()) { f.title.value = m.title; f.title.dispatchEvent(new Event('input')); }
+        if (m.artist && !f.artist.value.trim()) { f.artist.value = m.artist; f.artist.dispatchEvent(new Event('fill')); }
+        if (m.key && [...f.key.options].some((o) => o.value === m.key)) { f.key.value = m.key; f.key.dispatchEvent(new Event('change')); got.push('key ' + prettyKey(m.key) + (m.minor ? ' (minor)' : '')); }
+        if (m.tempo) { f.tempo.value = m.tempo; f.tempo.dispatchEvent(new Event('input')); got.push(m.tempo + ' bpm'); }
+        if (m.time) {
+          if (![...f.time.options].some((o) => o.value === m.time)) f.time.add(new Option(m.time, m.time));
+          f.time.value = m.time; got.push(m.time);
+        }
+        if (!got.length && !m.lyrics) { toast('Nothing from MultiTracks found in that. Copy the whole song page and try again.'); return; }
+        d.close();
+        if (m.lyrics) { putLyrics(m.lyrics); got.push(`${m.parts} part${m.parts === 1 ? '' : 's'} of lyrics`); }
+        toast(`From MultiTracks: ${got.join(' · ')}${m.lyrics && m.parts <= 3 ? '. Only the start of the song came through: tap View all on MultiTracks and copy again for the rest' : ''}`);
+      });
+    });
 
     // YouTube: search helper
     $('#ytFind').addEventListener('click', () => {
@@ -3643,6 +3848,12 @@ Jesus is the answer</pre>
       f.artist.dispatchEvent(new Event('change'));
       drawArtistBox();
     };
+    // filled in from lyrics or MultiTracks: show it in the list too (a name we don't have yet becomes an artist)
+    f.artist.addEventListener('fill', () => {
+      const nm = f.artist.value.trim();
+      if (!nm) return;
+      setArtist(artistByName(nm) || newArtist(nm, { updated: 1, derived: true })); // kept only if the song is saved
+    });
     // featured artists (any number): same list as the main artist, so names are always spelled the same
     const fsel = f.featSel;
     const feats = () => f.featuring.value.split('|').map((x) => x.trim()).filter(Boolean);
