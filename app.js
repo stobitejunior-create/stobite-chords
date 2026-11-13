@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 37; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 38; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -770,7 +770,7 @@
     };
     const list = base
       .filter((s) => !state.tag || (s.tags || []).includes(state.tag))
-      .filter((s) => !q || `${s.title} ${s.artist} ${s.featuring || ''} ${(s.tags || []).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
+      .filter((s) => !q || `${s.title} ${s.artist} ${featOf(s).join(' ')} ${(s.tags || []).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
       .sort(sorters[prefs.sort] || sorters.title);
     $('#count').textContent = `${list.length === base.length ? '' : list.length + ' of '}${base.length} song${base.length === 1 ? '' : 's'}`;
     state.visible = list.map((s) => s.id);
@@ -1391,7 +1391,7 @@
     const draw = () => {
       const q = $('#pq', d).value.trim().toLowerCase();
       $('#pl', d).innerHTML = [...songs].sort((a, b) => a.title.localeCompare(b.title))
-        .filter((s) => !q || `${s.title} ${s.artist} ${s.featuring || ''}`.toLowerCase().includes(q))
+        .filter((s) => !q || `${s.title} ${s.artist} ${featOf(s).join(' ')}`.toLowerCase().includes(q))
         .map((s) => `<label class="pick-row" style="--h:${hueOf(s.title)}"><input type="checkbox" value="${esc(s.id)}"${chosen.has(s.id) ? ' checked' : ''}>
           <span class="av">${esc(prettyKey(s.key))}</span><span><b>${esc(s.title)}</b><small>${esc(byline(s))}</small></span>${inSet.has(s.id) ? '<em>In set</em>' : ''}</label>`).join('')
         || '<p style="padding:12px 8px">No songs match.</p>';
@@ -1470,7 +1470,8 @@
               <input type="hidden" name="artist" value="${esc(s.artist)}">
               <div id="portraitBox"></div></div>
             <div class="field full">Featuring (optional)
-              <select name="featSel" aria-label="Featured artist"></select>
+              <div class="feat-chips" id="featChips"></div>
+              <select name="featSel" aria-label="Add a featured artist"></select>
               <input type="hidden" name="featuring" value="${esc(s.featuring || '')}"></div>
             <label class="field">Original key<select name="key">${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <label class="field">We play it in<select name="playKey"><option value="">Same as original</option>${keys.map((k) => `<option value="${esc(k)}"${k === s.playKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
@@ -1619,7 +1620,7 @@ Jesus is the answer</pre>
       const { text, changed } = convertLetters(ta.value.replace(/\s+$/, ''), key);
       const data = {
         title, artist: f.artist.value.trim(), key,
-        featuring: normName(f.featuring.value) === normName(f.artist.value) ? '' : f.featuring.value.trim(),
+        featuring: [...new Set(f.featuring.value.split('|').map((x) => x.trim()).filter((x) => x && normName(x) !== normName(f.artist.value)))].join('|'),
         tempo: f.tempo.value ? Math.round(+f.tempo.value) : '',
         time: f.time.value, info: f.info.value.trim(), chart: text, tags: [...new Set(parseTags())], updated: Date.now(),
         playKey: f.playKey.value && f.playKey.value !== key ? f.playKey.value : '',
@@ -2966,8 +2967,9 @@ Jesus is the answer</pre>
   const artistByName = (n) => { const k = normName(n); return k ? artists.find((x) => normName(x.name) === k) || null : null; };
   const artistOf = (song) => artistByName(song.artist);
   const sortedArtists = () => [...artists].sort((x, y) => x.name.localeCompare(y.name));
-  const songsBy = (a) => songs.filter((x) => normName(x.artist) === normName(a.name) || (x.featuring && normName(x.featuring) === normName(a.name))); // the main artist and the featured one both get the song
-  const byline = (s) => [s.artist, s.featuring ? 'ft. ' + s.featuring : ''].filter(Boolean).join(' ');
+  const featOf = (s) => String(s.featuring || '').split('|').map((x) => x.trim()).filter(Boolean); // featured artists are kept in one text field, split by |
+  const songsBy = (a) => songs.filter((x) => normName(x.artist) === normName(a.name) || featOf(x).some((n) => normName(n) === normName(a.name))); // the main artist and every featured one get the song
+  const byline = (s) => [s.artist, featOf(s).length ? 'ft. ' + featOf(s).join(', ') : ''].filter(Boolean).join(' ');
   const nameHash = (str) => { let h = 5381; for (const ch of str) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; return h.toString(36); };
   const saveArtists = () => { writeJSON(artistsKey(), artists); scheduleSync(); };
 
@@ -2989,7 +2991,7 @@ Jesus is the answer</pre>
   /** Every artist named on a song gets an artist item (made quietly from the song, so nothing is lost or retyped). */
   function ensureArtists() {
     let changed = false;
-    for (const song of songs) for (const nm of [song.artist, song.featuring]) {
+    for (const song of songs) for (const nm of [song.artist, ...featOf(song)]) {
       if (!nm || artistByName(nm)) continue;
       const a = newArtist(nm, { updated: 1, derived: true });
       if (synced.artists && synced.artists[a.id] && synced.artists[a.id].d) { a.updated = Date.now(); a.derived = false; } // it was deleted before: bring it back
@@ -3105,7 +3107,7 @@ Jesus is the answer</pre>
           const stamp = Date.now();
           for (const sg of songsBy(a)) {
             if (normName(sg.artist) === normName(was)) sg.artist = name;
-            if (sg.featuring && normName(sg.featuring) === normName(was)) sg.featuring = name;
+            if (featOf(sg).some((n) => normName(n) === normName(was))) sg.featuring = featOf(sg).map((n) => (normName(n) === normName(was) ? name : n)).join('|');
             sg.updated = stamp;
           }
           saveLibrary();
@@ -3591,19 +3593,24 @@ Jesus is the answer</pre>
       f.artist.dispatchEvent(new Event('change'));
       drawArtistBox();
     };
-    // featured artist: same list, so the name is always spelled the same
+    // featured artists (any number): same list as the main artist, so names are always spelled the same
     const fsel = f.featSel;
-    let lastFeat = '';
-    const fillFeat = (pickId) => {
-      const cur = pickId !== undefined ? pickId : (artistByName(f.featuring.value) || {}).id || '';
-      fsel.innerHTML = `<option value="">None</option>${sortedArtists().filter((a) => normName(a.name) !== normName(f.artist.value)).map((a) => `<option value="${esc(a.id)}"${a.id === cur ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="__new">＋ Add a new artist…</option>`;
-      fsel.value = cur || '';
-      lastFeat = fsel.value;
+    const feats = () => f.featuring.value.split('|').map((x) => x.trim()).filter(Boolean);
+    const setFeats = (list) => { f.featuring.value = list.join('|'); fillFeat(); };
+    const fillFeat = () => {
+      const used = new Set([...feats(), f.artist.value].map(normName));
+      $('#featChips').innerHTML = feats().map((n, i) => `<span class="chip on">${esc(n)}<button type="button" data-rm="${i}" aria-label="Remove ${esc(n)}">×</button></span>`).join('');
+      fsel.innerHTML = `<option value="">${feats().length ? 'Add another featured artist…' : 'Add a featured artist…'}</option>${sortedArtists().filter((a) => !used.has(normName(a.name))).map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}<option value="__new">＋ Add a new artist…</option>`;
+      fsel.value = '';
     };
     fsel.addEventListener('change', () => {
-      if (fsel.value === '__new') { fsel.value = lastFeat; openArtistEditor(null, (out) => { if (out) { f.featuring.value = out.name; fillFeat(out.id); } }); return; }
-      lastFeat = fsel.value;
-      f.featuring.value = (artistById(fsel.value) || {}).name || '';
+      if (fsel.value === '__new') { fsel.value = ''; openArtistEditor(null, (out) => { if (out) setFeats([...feats(), out.name]); }); return; }
+      const a = artistById(fsel.value);
+      if (a) setFeats([...feats(), a.name]); else fillFeat();
+    });
+    $('#featChips').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-rm]');
+      if (b) setFeats(feats().filter((_, i) => i !== +b.dataset.rm));
     });
     sel.addEventListener('change', () => {
       if (sel.value === '__new') { sel.value = lastSel; openArtistEditor(null, (out) => { if (out) setArtist(out); }); return; }

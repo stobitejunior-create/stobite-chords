@@ -839,3 +839,7 @@ dialog.photo-modal { width: min(560px, calc(100vw - 16px)); }
 .blk.k-own { --k: var(--other); }
 .blk.k-own:not(.k-none) { background: linear-gradient(90deg, color-mix(in srgb, var(--k) 14%, transparent), color-mix(in srgb, var(--k) 4%, transparent) 70%, transparent); }
 .chordbar button.own { border: 1.5px dashed var(--primary); }
+.feat-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.feat-chips:empty { display: none; }
+.feat-chips .chip { display: inline-flex; align-items: center; gap: 6px; }
+.feat-chips .chip button { appearance: none; border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1; padding: 0 2px; cursor: pointer; }
