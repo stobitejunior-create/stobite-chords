@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 36; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 37; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -700,7 +700,7 @@
       ${avHTML(s)}
       <span class="sc-body">
         <span class="sc-title">${esc(s.title)}</span>
-        <span class="sc-artist">${esc(s.artist || 'Unknown artist')}</span>
+        <span class="sc-artist">${esc(byline(s) || 'Unknown artist')}</span>
         ${s.tags && s.tags.length ? `<span class="sc-tags">${s.tags.slice(0, 3).map((t) => `<i>${esc(t)}</i>`).join('')}</span>` : ''}
       </span>
       <span class="sc-meta">${isFav(s.id) ? icon('star', 'fill star') : ''}${s.tempo ? `<span>${esc(s.tempo)} bpm</span>` : ''}${s.time ? `<span>${esc(s.time)}</span>` : ''}</span>
@@ -770,7 +770,7 @@
     };
     const list = base
       .filter((s) => !state.tag || (s.tags || []).includes(state.tag))
-      .filter((s) => !q || `${s.title} ${s.artist} ${(s.tags || []).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
+      .filter((s) => !q || `${s.title} ${s.artist} ${s.featuring || ''} ${(s.tags || []).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
       .sort(sorters[prefs.sort] || sorters.title);
     $('#count').textContent = `${list.length === base.length ? '' : list.length + ' of '}${base.length} song${base.length === 1 ? '' : 's'}`;
     state.visible = list.map((s) => s.id);
@@ -895,7 +895,7 @@
             ${set ? `<a class="eyebrow" href="#/set/${enc(set.id)}">${icon('list')}${esc(set.name)} · ${idx + 1} of ${set.items.length}</a>`
               : s.tags && s.tags.length ? `<span class="eyebrow">${esc(s.tags.join(' · '))}</span>` : ''}
             <h1>${esc(s.title)}</h1>
-            ${s.artist ? `<p class="hero-artist">${esc(s.artist)}</p>` : ''}
+            ${byline(s) ? `<p class="hero-artist">${esc(byline(s))}</p>` : ''}
           </div>
           <div class="stats">
             <button class="stat stat-btn key-flip" data-act="flip-key" title="Tap to see the original key">
@@ -1349,7 +1349,7 @@
         const opts = k ? KEYS.filter((x) => keyInfo(x).minor === k.minor) : [];
         return `<div class="set-item" style="--h:${hueOf(s.title)}">
           <span class="num">${i + 1}</span>
-          <a class="si-body" href="#/set/${enc(set.id)}/${i}"><b>${esc(s.title)}</b><small>${esc(s.artist || '')}${s.tempo ? ` · ${esc(s.tempo)} bpm` : ''}</small></a>
+          <a class="si-body" href="#/set/${enc(set.id)}/${i}"><b>${esc(s.title)}</b><small>${esc(byline(s))}${s.tempo ? ` · ${esc(s.tempo)} bpm` : ''}</small></a>
           ${k ? `<select class="si-key" data-key="${i}" aria-label="Key for this service">${opts.map((x) =>
             `<option value="${x === s.key ? '' : esc(x)}"${(it.key || s.key) === x ? ' selected' : ''}>${esc(prettyKey(x))}</option>`).join('')}</select>` : ''}
           <div class="si-btns">
@@ -1391,9 +1391,9 @@
     const draw = () => {
       const q = $('#pq', d).value.trim().toLowerCase();
       $('#pl', d).innerHTML = [...songs].sort((a, b) => a.title.localeCompare(b.title))
-        .filter((s) => !q || `${s.title} ${s.artist}`.toLowerCase().includes(q))
+        .filter((s) => !q || `${s.title} ${s.artist} ${s.featuring || ''}`.toLowerCase().includes(q))
         .map((s) => `<label class="pick-row" style="--h:${hueOf(s.title)}"><input type="checkbox" value="${esc(s.id)}"${chosen.has(s.id) ? ' checked' : ''}>
-          <span class="av">${esc(prettyKey(s.key))}</span><span><b>${esc(s.title)}</b><small>${esc(s.artist || '')}</small></span>${inSet.has(s.id) ? '<em>In set</em>' : ''}</label>`).join('')
+          <span class="av">${esc(prettyKey(s.key))}</span><span><b>${esc(s.title)}</b><small>${esc(byline(s))}</small></span>${inSet.has(s.id) ? '<em>In set</em>' : ''}</label>`).join('')
         || '<p style="padding:12px 8px">No songs match.</p>';
     };
     $('#pq', d).addEventListener('input', draw);
@@ -1469,6 +1469,9 @@
               <select name="artistSel" aria-label="Artist"></select>
               <input type="hidden" name="artist" value="${esc(s.artist)}">
               <div id="portraitBox"></div></div>
+            <div class="field full">Featuring (optional)
+              <select name="featSel" aria-label="Featured artist"></select>
+              <input type="hidden" name="featuring" value="${esc(s.featuring || '')}"></div>
             <label class="field">Original key<select name="key">${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <label class="field">We play it in<select name="playKey"><option value="">Same as original</option>${keys.map((k) => `<option value="${esc(k)}"${k === s.playKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <div class="field">Tempo (bpm)<div class="with-btn"><input name="tempo" type="number" inputmode="numeric" min="20" max="300" value="${esc(s.tempo)}" placeholder="72" aria-label="Tempo"><button type="button" class="btn soft" id="tap" title="Tap along to the beat">${icon('hand')}Tap</button></div></div>
@@ -1616,6 +1619,7 @@ Jesus is the answer</pre>
       const { text, changed } = convertLetters(ta.value.replace(/\s+$/, ''), key);
       const data = {
         title, artist: f.artist.value.trim(), key,
+        featuring: normName(f.featuring.value) === normName(f.artist.value) ? '' : f.featuring.value.trim(),
         tempo: f.tempo.value ? Math.round(+f.tempo.value) : '',
         time: f.time.value, info: f.info.value.trim(), chart: text, tags: [...new Set(parseTags())], updated: Date.now(),
         playKey: f.playKey.value && f.playKey.value !== key ? f.playKey.value : '',
@@ -1795,7 +1799,7 @@ Jesus is the answer</pre>
   const APP_ID = 'stobite-chords';
   const cleanSong = (s) => ({
     id: s.id, title: s.title, artist: s.artist || '', key: s.key || '', tempo: s.tempo || '', time: s.time || '',
-    info: s.info || '', tags: s.tags || [], chart: s.chart || '', updated: s.updated || 0, playKey: s.playKey || '', video: s.video || '',
+    info: s.info || '', tags: s.tags || [], chart: s.chart || '', updated: s.updated || 0, playKey: s.playKey || '', video: s.video || '', featuring: s.featuring || '',
   });
   const cleanSet = (s) => ({ id: s.id, name: s.name, date: s.date || '', notes: s.notes || '', items: s.items.map((i) => ({ songId: i.songId, key: i.key || '' })), updated: s.updated || 0 });
   const cleanArtist = (a) => ({ id: a.id, name: a.name, photo: a.photo || '', src: a.src || '', updated: a.updated || 0 });
@@ -1910,6 +1914,7 @@ Jesus is the answer</pre>
       id: typeof s.id === 'string' && s.id ? s.id : uid(),
       title: s.title.trim().slice(0, 200),
       artist: String(s.artist || '').slice(0, 200),
+      featuring: String(s.featuring || '').slice(0, 200),
       key: String(s.key || ''),
       tempo: Number(s.tempo) ? Math.round(Number(s.tempo)) : '',
       time: String(s.time || ''),
@@ -1940,7 +1945,7 @@ Jesus is the answer</pre>
     return JSON.parse(text);
   }
 
-  const sameSong = (a, b) => ['title', 'artist', 'key', 'tempo', 'time', 'info', 'chart'].every((k) => String(a[k] ?? '') === String(b[k] ?? ''));
+  const sameSong = (a, b) => ['title', 'artist', 'featuring', 'key', 'tempo', 'time', 'info', 'chart'].every((k) => String(a[k] ?? '') === String(b[k] ?? ''));
 
   /** Adds new items; replaces something you already have only when the incoming copy is newer. */
   function mergeAll(data) {
@@ -2008,7 +2013,7 @@ Jesus is the answer</pre>
     const d = modal(`
       <h2>Import ${data.setlists.length ? 'setlist' : `${n} song${n > 1 ? 's' : ''}`}?</h2>
       <p>Someone shared this with you.${data.setlists.length ? ` Setlist: <b>${esc(data.setlists[0].name)}</b>.` : ''}</p>
-      <ul class="titles">${data.songs.map((s) => `<li><b>${esc(s.title)}</b>${s.artist ? ` · ${esc(s.artist)}` : ''}</li>`).join('')}</ul>
+      <ul class="titles">${data.songs.map((s) => `<li><b>${esc(s.title)}</b>${byline(s) ? ` · ${esc(byline(s))}` : ''}</li>`).join('')}</ul>
       <div class="row"><form method="dialog"><button class="btn ghost">Not now</button></form><button class="btn primary" data-x="go">Add to my library</button></div>`);
     d.addEventListener('click', (e) => {
       if (!e.target.closest('[data-x="go"]')) return;
@@ -2072,11 +2077,13 @@ Jesus is the answer</pre>
     chart: s.chart || '', updated: s.updated || 0, deleted: false,
     ...(sync.noPlayKey ? {} : { play_key: (s.playKey || '').slice(0, 8) }),
     ...(sync.noVideo ? {} : { video: (s.video || '').slice(0, 300) }),
+    ...(sync.noFeaturing ? {} : { featuring: (s.featuring || '').slice(0, 200) }),
   });
   const rowToSong = (r) => ({
     id: r.id, title: r.title, artist: r.artist, key: r.key, tempo: r.tempo ?? '', time: r.time, info: r.info, tags: r.tags || [], chart: r.chart, updated: Number(r.updated) || 0,
     playKey: r.play_key ?? (byId(r.id) || {}).playKey ?? '',
     video: r.video ?? (byId(r.id) || {}).video ?? '',
+    featuring: r.featuring ?? (byId(r.id) || {}).featuring ?? '',
   });
   const setToRow = (st) => ({
     team_id: team.id, id: st.id, name: (st.name || '').slice(0, 200), date: (st.date || '').slice(0, 10), notes: st.notes || '',
@@ -2224,10 +2231,10 @@ Jesus is the answer</pre>
           for (let i = 0; i < rows.length; i += 200) {
             let chunk = rows.slice(i, i + 200);
             let { error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' });
-            for (let tries = 0; error && table === 'songs' && tries < 2; tries++) {
+            for (let tries = 0; error && table === 'songs' && tries < 3; tries++) {
               // The database may not have the newest optional columns yet: sync everything else.
-              if (/play_key/.test(error.message)) sync.noPlayKey = true; else if (/video/.test(error.message)) sync.noVideo = true; else break;
-              chunk = chunk.map(({ play_key, video, ...rest }) => ({ ...rest, ...(sync.noPlayKey ? {} : { play_key }), ...(sync.noVideo ? {} : { video }) }));
+              if (/play_key/.test(error.message)) sync.noPlayKey = true; else if (/video/.test(error.message)) sync.noVideo = true; else if (/featuring/.test(error.message)) sync.noFeaturing = true; else break;
+              chunk = chunk.map(({ play_key, video, featuring, ...rest }) => ({ ...rest, ...(sync.noPlayKey ? {} : { play_key }), ...(sync.noVideo ? {} : { video }), ...(sync.noFeaturing ? {} : { featuring }) }));
               ({ error } = await sync.client.from(table).upsert(chunk, { onConflict: 'team_id,id' }));
             }
             if (error) throw error;
@@ -2340,7 +2347,7 @@ Jesus is the answer</pre>
     const withKey = songs.filter((x) => x.playKey);
     if (withKey.length) {
       const { error } = await sync.client.from('songs').upsert(withKey.map(songToRow), { onConflict: 'team_id,id' });
-      if (error) { if (/play_key/.test(error.message)) sync.noPlayKey = true; else if (/video/.test(error.message)) sync.noVideo = true; return; }
+      if (error) { if (/play_key/.test(error.message)) sync.noPlayKey = true; else if (/video/.test(error.message)) sync.noVideo = true; else if (/featuring/.test(error.message)) sync.noFeaturing = true; return; }
     }
     writeJSON(flag, true);
   }
@@ -2723,7 +2730,7 @@ Jesus is the answer</pre>
     draw();
   }
 
-  const CHANGE_FIELDS = [['title', 'title'], ['artist', 'artist'], ['key', 'key'], ['tempo', 'tempo'], ['time', 'time signature'], ['info', 'notes'], ['play_key', 'band key'], ['video', 'YouTube link']];
+  const CHANGE_FIELDS = [['title', 'title'], ['artist', 'artist'], ['key', 'key'], ['tempo', 'tempo'], ['time', 'time signature'], ['info', 'notes'], ['play_key', 'band key'], ['video', 'YouTube link'], ['featuring', 'featured artist']];
   /** What differs between a version and the one before it. */
   function describeChange(cur, older) {
     if (!older) return 'First version';
@@ -2764,7 +2771,7 @@ Jesus is the answer</pre>
       if (!b) return;
       const picked = list[+b.dataset.v], v = picked.data, mine = byId(row.song_id);
       const prior = Math.max(Number(list[0].at) || 0, mine ? mine.updated || 0 : 0, ((synced.songs[row.song_id] || {}).u) || 0);
-      const song = { id: row.song_id, title: v.title, artist: v.artist || '', key: v.key || '', tempo: v.tempo ?? '', time: v.time || '', info: v.info || '', tags: v.tags || [], chart: v.chart || '', playKey: v.play_key || '', video: v.video || '', updated: Math.max(Date.now(), prior + 1) };
+      const song = { id: row.song_id, title: v.title, artist: v.artist || '', key: v.key || '', tempo: v.tempo ?? '', time: v.time || '', info: v.info || '', tags: v.tags || [], chart: v.chart || '', playKey: v.play_key || '', video: v.video || '', featuring: v.featuring || '', updated: Math.max(Date.now(), prior + 1) };
       if (mine) Object.assign(mine, song);
       else { trashTake('songs', row.song_id); songs.push(song); }
       saveLibrary(); ensureArtists(); renderNav();
@@ -2959,7 +2966,8 @@ Jesus is the answer</pre>
   const artistByName = (n) => { const k = normName(n); return k ? artists.find((x) => normName(x.name) === k) || null : null; };
   const artistOf = (song) => artistByName(song.artist);
   const sortedArtists = () => [...artists].sort((x, y) => x.name.localeCompare(y.name));
-  const songsBy = (a) => songs.filter((x) => normName(x.artist) === normName(a.name));
+  const songsBy = (a) => songs.filter((x) => normName(x.artist) === normName(a.name) || (x.featuring && normName(x.featuring) === normName(a.name))); // the main artist and the featured one both get the song
+  const byline = (s) => [s.artist, s.featuring ? 'ft. ' + s.featuring : ''].filter(Boolean).join(' ');
   const nameHash = (str) => { let h = 5381; for (const ch of str) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; return h.toString(36); };
   const saveArtists = () => { writeJSON(artistsKey(), artists); scheduleSync(); };
 
@@ -2981,9 +2989,9 @@ Jesus is the answer</pre>
   /** Every artist named on a song gets an artist item (made quietly from the song, so nothing is lost or retyped). */
   function ensureArtists() {
     let changed = false;
-    for (const song of songs) {
-      if (!song.artist || artistByName(song.artist)) continue;
-      const a = newArtist(song.artist, { updated: 1, derived: true });
+    for (const song of songs) for (const nm of [song.artist, song.featuring]) {
+      if (!nm || artistByName(nm)) continue;
+      const a = newArtist(nm, { updated: 1, derived: true });
       if (synced.artists && synced.artists[a.id] && synced.artists[a.id].d) { a.updated = Date.now(); a.derived = false; } // it was deleted before: bring it back
       changed = true;
     }
@@ -3095,7 +3103,11 @@ Jesus is the answer</pre>
         const was = a.name;
         if (name !== was) {
           const stamp = Date.now();
-          for (const sg of songsBy(a)) { sg.artist = name; sg.updated = stamp; }
+          for (const sg of songsBy(a)) {
+            if (normName(sg.artist) === normName(was)) sg.artist = name;
+            if (sg.featuring && normName(sg.featuring) === normName(was)) sg.featuring = name;
+            sg.updated = stamp;
+          }
           saveLibrary();
         }
         Object.assign(a, { name, photo: draft.photo, src: draft.src, updated: Date.now(), derived: false });
@@ -3579,12 +3591,28 @@ Jesus is the answer</pre>
       f.artist.dispatchEvent(new Event('change'));
       drawArtistBox();
     };
+    // featured artist: same list, so the name is always spelled the same
+    const fsel = f.featSel;
+    let lastFeat = '';
+    const fillFeat = (pickId) => {
+      const cur = pickId !== undefined ? pickId : (artistByName(f.featuring.value) || {}).id || '';
+      fsel.innerHTML = `<option value="">None</option>${sortedArtists().filter((a) => normName(a.name) !== normName(f.artist.value)).map((a) => `<option value="${esc(a.id)}"${a.id === cur ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="__new">＋ Add a new artist…</option>`;
+      fsel.value = cur || '';
+      lastFeat = fsel.value;
+    };
+    fsel.addEventListener('change', () => {
+      if (fsel.value === '__new') { fsel.value = lastFeat; openArtistEditor(null, (out) => { if (out) { f.featuring.value = out.name; fillFeat(out.id); } }); return; }
+      lastFeat = fsel.value;
+      f.featuring.value = (artistById(fsel.value) || {}).name || '';
+    });
     sel.addEventListener('change', () => {
       if (sel.value === '__new') { sel.value = lastSel; openArtistEditor(null, (out) => { if (out) setArtist(out); }); return; }
       lastSel = sel.value;
       setArtist(artistById(sel.value));
+      fillFeat();
     });
     fillArtistSelect();
+    fillFeat();
     drawArtistBox();
   }
 
