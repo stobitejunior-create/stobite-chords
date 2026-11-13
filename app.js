@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 39; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 40; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1489,7 +1489,6 @@
             <div class="get-lyrics">
               <button type="button" class="btn soft" id="findBtn">${icon('globe')}Find lyrics online</button>
             </div>
-            <div class="offer" id="lyricsOffer" hidden></div>
             <div class="chordbar" id="cbar">
               ${CHORD_GROUPS().map((g) => `<div class="cb-group"><span class="cb-label">${g.label}</span><div class="cb-row">${g.sets.map((st) => st.items.map((x) => st.kind === 'own' ? `<button type="button" class="secb own" data-own="1" title="Make your own section, e.g. &lt;Way Maker&gt;">${esc(x)}</button>`
                 : st.kind === 'sec'
@@ -3561,7 +3560,6 @@ Jesus is the answer</pre>
 
   /** Everything the song editor needs for photos, lyric search, pictures and the YouTube helper. */
   function wireEditorExtras(f, ta, draw) {
-    state.offerOff = false;
     const putLyrics = (text) => {
       if (ta.value.trim() && !confirm('Replace the lyrics you already have here?\n\nOK = replace them\nCancel = add these at the end')) ta.value = `${ta.value.replace(/\s+$/, '')}\n\n${text}`;
       else ta.value = text;
@@ -3616,24 +3614,6 @@ Jesus is the answer</pre>
       });
     };
     $('#findBtn').addEventListener('click', findLyrics);
-
-    // offer to look them up once title + artist are typed and the lyrics box is empty
-    const offer = $('#lyricsOffer');
-    const updateOffer = () => {
-      const title = f.title.value.trim(), artist = f.artist.value.trim();
-      const show = !!(title && artist && !ta.value.trim() && !state.offerOff);
-      offer.hidden = !show;
-      if (show) offer.innerHTML = `<span>${icon('globe')}<span>Pull the lyrics for <b>${esc(title)}</b> by <b>${esc(artist)}</b> from the internet?</span></span>
-        <span class="offer-btns"><button type="button" class="btn primary" data-o="go">Find lyrics</button><button type="button" class="btn ghost" data-o="no">No thanks</button></span>`;
-    };
-    offer.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-o]');
-      if (!b) return;
-      if (b.dataset.o === 'no') { state.offerOff = true; updateOffer(); } else findLyrics();
-    });
-    for (const el of [f.title, f.artist]) { el.addEventListener('input', updateOffer); el.addEventListener('change', updateOffer); }
-    ta.addEventListener('input', updateOffer);
-    updateOffer();
 
     // YouTube: search helper
     $('#ytFind').addEventListener('click', () => {
