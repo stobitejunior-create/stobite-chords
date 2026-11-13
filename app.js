@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 38; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 39; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1681,13 +1681,83 @@ Jesus is the answer</pre>
     main.innerHTML = `
       <header class="topbar">
         <a class="btn ghost" href="#/artists">${icon('chevL')}<span>Artists</span></a>
-        <div class="tb-actions"><button class="btn soft" id="artEdit">${icon('edit')}<span>Edit artist</span></button></div>
+        <div class="tb-actions"><button class="btn soft" id="artFind">${icon('globe')}<span>Find songs</span></button><button class="btn soft" id="artEdit">${icon('edit')}<span>Edit artist</span></button></div>
       </header>
       <div class="content">
         <div class="artist-head">${artistPic(a, 'lg')}<div><h1>${esc(a.name)}</h1><p class="sub">${list.length} song${list.length === 1 ? '' : 's'}${a.photo ? '' : ' · no portrait yet. Tap Edit artist to add one.'}</p></div></div>
         <div class="song-grid">${list.map((x) => songCard(x, false)).join('') || emptyState('music', 'No songs yet', 'Songs you add with this artist show up here.', '<a class="btn primary" href="#/new">' + icon('plus') + 'New song</a>')}</div>
       </div>`;
+    $('#artFind').addEventListener('click', () => openArtistSongs(a));
     $('#artEdit').addEventListener('click', () => openArtistEditor(a, (out) => { if (out) viewArtist(out.id); else go('#/artists'); }));
+  }
+
+  /* ================= find an artist's songs online ================= */
+  /** "Chris Tomlin - Good Good Father (Audio) (feat. X)" -> { title: "Good Good Father", feat: ["X"] } */
+  function cleanTrack(name, artist) {
+    let t = String(name || '').trim();
+    const feat = [];
+    t = t.replace(/\s*[([]\s*(?:feat\.?|ft\.?|featuring)\s+([^)\]]+)[)\]]/gi, (m, f) => { feat.push(...f.split(/\s*(?:,|&|\band\b)\s*/).map((x) => x.trim()).filter(Boolean)); return ''; });
+    t = t.replace(/\s*[([]\s*(?:official|audio|lyrics?|lyric video|live|with chords|lyrics and chords|intro|video)[^)\]]*[)\]]/gi, '');
+    t = t.replace(/\s*[([]\s*\d{4}[_-].*?[)\]]/g, '').replace(/\s*[([][^)\]]*album version[)\]]/gi, '').replace(/\s+[-–]\s+[^-–]*album version$/i, '').replace(/\s+lyrics\s*(?:&|and)\s*chords$/i, '');
+    const pre = normName(artist);
+    if (normName(t).startsWith(pre + ' - ')) t = t.slice(pre.length + 3);
+    else if (normName(t).startsWith(pre + ' ') && t.length > pre.length + 3) t = t.slice(pre.length + 1);
+    return { title: t.replace(/\s+/g, ' ').trim(), feat };
+  }
+
+  async function artistTracks(artist) {
+    const who = artistQuery(artist), want = normName(who);
+    const queries = [who, `${who} the`, `${who} lord`, `${who} jesus`, `${who} love`]; // the service returns only 20 per search, so ask a few ways
+    const lists = await Promise.all(queries.map((q) => fetch('https://lrclib.net/api/search?q=' + enc(q)).then((r) => (r.ok ? r.json() : [])).catch(() => [])));
+    const out = new Map();
+    for (const x of lists.flat()) {
+      if (!x.plainLyrics || x.plainLyrics.trim().length < 20 || !normName(x.artistName).includes(want)) continue;
+      const { title, feat } = cleanTrack(x.trackName, who);
+      const k = normName(title);
+      if (!k || out.has(k)) continue;
+      out.set(k, { title, feat, album: x.albumName || '', text: x.plainLyrics });
+    }
+    return [...out.values()].sort((p, q) => p.title.localeCompare(q.title));
+  }
+
+  function openArtistSongs(a) {
+    const d = modal(`
+      <h2>Songs by ${esc(a.name)}</h2>
+      <p class="sub" id="afNote">Looking for songs…</p>
+      <div class="pick-list" id="afList"></div>
+      <div class="row"><form method="dialog"><button class="btn ghost" autofocus>Close</button></form><button class="btn primary" id="afAdd" disabled>Add</button></div>`);
+    const have = (t) => songs.some((x) => normName(x.title) === normName(t));
+    let found = [];
+    const chosen = new Set();
+    const refresh = () => {
+      const b = $('#afAdd', d), n = [...chosen].filter((i) => !have(found[i].title)).length;
+      b.disabled = !chosen.size;
+      b.textContent = n ? `Add ${n} song${n > 1 ? 's' : ''}` : 'Add';
+    };
+    artistTracks(a.name).then((list) => {
+      found = list;
+      const newOnes = list.filter((x) => !have(x.title)).length;
+      $('#afNote', d).textContent = list.length
+        ? `${list.length} found (${list.length - newOnes} already in your library). Tick the ones to add. Songs you already have are never changed. Lyrics only: add the chords yourself.`
+        : 'No songs found. Try again later, or check the artist’s spelling.';
+      $('#afList', d).innerHTML = list.map((x, i) => `<label class="pick-row" style="--h:${hueOf(x.title)}"><input type="checkbox" value="${i}">
+        <span class="av">${icon('music')}</span><span><b>${esc(x.title)}</b><small>${esc(x.album)}${x.feat.length ? ` · ft. ${esc(x.feat.join(', '))}` : ''}</small></span>${have(x.title) ? '<em>In library</em>' : ''}</label>`).join('');
+    }).catch(() => { $('#afNote', d).textContent = 'Couldn’t reach the lyrics service. Check your connection and try again.'; });
+    $('#afList', d).addEventListener('change', (e) => { if (e.target.checked) chosen.add(+e.target.value); else chosen.delete(+e.target.value); refresh(); });
+    $('#afAdd', d).addEventListener('click', () => {
+      const now = Date.now();
+      let added = 0, kept = 0;
+      for (const i of chosen) {
+        const x = found[i];
+        if (have(x.title)) { kept++; continue; } // already in the library: never overwritten
+        songs.push({ id: uid(), title: x.title, artist: a.name, featuring: x.feat.filter((n) => normName(n) !== normName(a.name)).join('|'), key: 'C', tempo: '', time: '4/4', info: '', tags: ['Needs chords'], chart: structureLyrics(x.text), updated: now + added });
+        added++;
+      }
+      if (added) { ensureArtists(); saveLibrary(); }
+      d.close();
+      toast(`${added ? `Added ${added} song${added > 1 ? 's' : ''} (tagged Needs chords)` : 'Nothing new to add'}${kept ? ` · ${kept} already in your library, left as they were` : ''}`);
+      viewArtist(a.id);
+    });
   }
 
   /* ================= recently deleted ================= */
