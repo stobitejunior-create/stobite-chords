@@ -21,6 +21,7 @@
     share: '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>',
     edit: '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/>',
+    cols: '<rect x="3" y="4" width="7.5" height="16" rx="1.5"/><rect x="13.5" y="4" width="7.5" height="16" rx="1.5"/>',
     stage: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
     chevL: '<path d="m15 18-6-6 6-6"/>',
     chevU: '<path d="m18 15-6-6-6 6"/>',
@@ -54,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 44; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 45; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1083,6 +1084,9 @@
   }
 
   /* ---------- stage mode ---------- */
+  const COL_NAMES = { auto: 'Auto', 1: '1', 2: '2', 3: '3' };
+  const applyCols = () => { document.body.dataset.cols = prefs.stageCols || 'auto'; };
+  applyCols();
   function enterStage() {
     document.body.classList.add('stage');
     try { document.documentElement.requestFullscreen?.().catch(() => {}); } catch { /* unsupported */ }
@@ -1106,6 +1110,7 @@
         <span class="dt title">${esc(state.song.title)}${set ? ` <small>${i + 1} / ${set.items.length}</small>` : ''}</span>
         <button class="db go" data-d="stage-scroll" title="${scroller.on ? 'Pause auto-scroll' : 'Start auto-scroll'}">${icon(scroller.on ? 'pause' : 'play', 'fill')}</button>
         <span class="size-pair"><button class="db" data-d="size-" title="Smaller text">A−</button><button class="db" data-d="size+" title="Bigger text">A+</button></span>
+        <button class="db cols-b" data-d="cols" title="Columns: tap to change (Auto splits the song on big screens)">${icon('cols')}<small>${COL_NAMES[prefs.stageCols] || 'Auto'}</small></button>
         <button class="db" data-d="stage-off" title="Leave full screen">${icon('x')}</button></div>`);
     }
     if (inSong && state.scrollMode) {
@@ -1137,6 +1142,13 @@
       case 'prev': setStep(-1); break;
       case 'next': setStep(1); break;
       case 'stage-off': exitStage(); break;
+      case 'cols': { // Auto -> 1 -> 2 -> 3 -> Auto
+        const order = ['auto', '1', '2', '3'];
+        prefs.stageCols = order[(order.indexOf(prefs.stageCols || 'auto') + 1) % order.length];
+        savePrefs(); applyCols(); renderDock();
+        toast(prefs.stageCols === 'auto' ? 'Columns: automatic (split on big screens)' : `${prefs.stageCols} column${prefs.stageCols === '1' ? '' : 's'}`);
+        break;
+      }
       case 'size-': case 'size+': changeSize(b.dataset.d === 'size+' ? 2 : -2); break;
       case 'scroll-toggle': playScroll(!scroller.on); break;
       case 'stage-scroll': if (!state.scrollMode) startScroll(); else playScroll(!scroller.on); renderDock(); break;

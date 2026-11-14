@@ -847,3 +847,14 @@ dialog.photo-modal { width: min(560px, calc(100vw - 16px)); }
 /* artist name / portrait on the song page open that artist */
 .hero-artist .alink { color: inherit; text-decoration: none; cursor: pointer; }
 .hero-av[data-artist] { cursor: pointer; }
+
+/* full screen: the song split into columns so a long song fits at a glance (iPad, laptop, TV) */
+body.stage .chart { column-gap: 44px; column-rule: 1px solid var(--line); column-fill: balance; }
+body.stage[data-cols="2"] .chart { column-count: 2; }
+body.stage[data-cols="3"] .chart { column-count: 3; }
+@media (min-width: 900px) and (orientation: landscape) { body.stage[data-cols="auto"] .chart { column-count: 2; } }
+@media (min-width: 1500px) and (orientation: landscape) { body.stage[data-cols="auto"] .chart { column-count: 3; } }
+@media (max-width: 599px) { body.stage[data-cols="3"] .chart { column-count: 2; } }
+body.stage .chart .blk, body.stage .chart .ln { break-inside: avoid; }
+.dock .cols-b { display: inline-flex; align-items: center; gap: 4px; width: auto; padding: 0 12px; border-radius: 999px; }
+.dock .cols-b small { font-size: 12px; font-weight: 750; }
