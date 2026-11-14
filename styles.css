@@ -858,3 +858,12 @@ body.stage[data-cols="3"] .chart { column-count: 3; }
 body.stage .chart .blk, body.stage .chart .ln { break-inside: avoid; }
 .dock .cols-b { display: inline-flex; align-items: center; gap: 4px; width: auto; padding: 0 12px; border-radius: 999px; }
 .dock .cols-b small { font-size: 12px; font-weight: 750; }
+
+/* full screen split: verses one side, chorus/bridge/tag the other, parts shared out evenly */
+body.stage .chart.is-split { column-count: auto !important; }
+.chart.is-split > :not(.split) { display: none; }
+.split { display: grid; grid-template-columns: repeat(var(--k, 2), minmax(0, 1fr)); align-items: stretch; }
+.split-col { padding: 0 26px; min-width: 0; }
+.split-col:first-child { padding-left: 0; }
+.split-col:last-child { padding-right: 0; }
+.split-col + .split-col { border-left: 1px solid var(--line); }

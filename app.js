@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 45; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 46; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -958,6 +958,7 @@
     const used = lyrics ? [] : chordsUsed(s.chart, o);
     $('#used').innerHTML = used.length ? `<span>${state.part === 'bass' ? 'Bass notes' : 'Chords'}</span>${used.join('')}` : '';
     $('#chart').innerHTML = renderChart(s.chart, o) || '<p class="sub">This song has no lyrics yet. Tap Edit to add them.</p>';
+    layoutStage();
     $('#tp')?.addEventListener('change', (e) => {
       const v = e.target.value;
       prefs.songKeys = prefs.songKeys || {};
@@ -1087,15 +1088,62 @@
   const COL_NAMES = { auto: 'Auto', 1: '1', 2: '2', 3: '3' };
   const applyCols = () => { document.body.dataset.cols = prefs.stageCols || 'auto'; };
   applyCols();
+  /** How many columns full screen uses right now (Auto: 2 on a landscape iPad or laptop, 3 on very wide screens). */
+  function stageCols() {
+    const c = prefs.stageCols || 'auto';
+    if (c !== 'auto') return innerWidth < 600 ? Math.min(2, +c) : +c;
+    if (!matchMedia('(orientation: landscape)').matches || innerWidth < 900) return 1;
+    return innerWidth >= 1500 ? 3 : 2;
+  }
+  /**
+   * Full screen with columns: verses (and the intro) on the left, chorus, bridge, tag… on the right,
+   * each part shown once, and the parts shared out evenly (2:2, 2:3, never 1:3).
+   */
+  function layoutStage() {
+    const chart = $('#chart');
+    if (!chart) return;
+    chart.querySelector(':scope > .split')?.remove();
+    chart.classList.remove('is-split');
+    const k = document.body.classList.contains('stage') ? stageCols() : 1;
+    const blocks = [...chart.querySelectorAll(':scope > section.blk')];
+    if (k < 2 || blocks.length < 2) return;
+    const label = (b) => (b.querySelector('.blk-label')?.textContent || '').trim();
+    const seen = new Set();
+    const parts = blocks.filter((b) => { // a chorus sung three times is shown once
+      const key = label(b).toLowerCase().replace(/\s*\d+$/, '') + '|' + b.textContent.replace(label(b), '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+    const left = parts.filter((b) => b.classList.contains('k-verse') || /^intro/i.test(label(b)) || b.classList.contains('k-none'));
+    const order = [...left, ...parts.filter((b) => !left.includes(b))];
+    const split = document.createElement('div');
+    split.className = 'split';
+    split.style.setProperty('--k', k);
+    let from = 0;
+    for (let c = 0; c < k; c++) { // first columns get the extra part when they can't be equal
+      const n = Math.ceil((order.length - from) / (k - c));
+      const col = document.createElement('div');
+      col.className = 'split-col';
+      order.slice(from, from + n).forEach((b) => col.appendChild(b.cloneNode(true)));
+      from += n;
+      split.appendChild(col);
+    }
+    chart.appendChild(split);
+    chart.classList.add('is-split');
+  }
+  let colTimer = 0;
+  addEventListener('resize', () => { clearTimeout(colTimer); colTimer = setTimeout(() => { if (document.body.classList.contains('stage')) layoutStage(); }, 150); });
   function enterStage() {
     document.body.classList.add('stage');
     try { document.documentElement.requestFullscreen?.().catch(() => {}); } catch { /* unsupported */ }
+    layoutStage();
     renderDock();
   }
   function exitStage() {
     if (!document.body.classList.contains('stage')) return;
     document.body.classList.remove('stage');
     try { if (document.fullscreenElement) document.exitFullscreen(); } catch { /* ignore */ }
+    layoutStage();
     renderDock();
   }
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) exitStage(); });
@@ -1145,7 +1193,7 @@
       case 'cols': { // Auto -> 1 -> 2 -> 3 -> Auto
         const order = ['auto', '1', '2', '3'];
         prefs.stageCols = order[(order.indexOf(prefs.stageCols || 'auto') + 1) % order.length];
-        savePrefs(); applyCols(); renderDock();
+        savePrefs(); applyCols(); layoutStage(); renderDock();
         toast(prefs.stageCols === 'auto' ? 'Columns: automatic (split on big screens)' : `${prefs.stageCols} column${prefs.stageCols === '1' ? '' : 's'}`);
         break;
       }
