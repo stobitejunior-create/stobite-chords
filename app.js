@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 41; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 42; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -895,7 +895,7 @@
             ${set ? `<a class="eyebrow" href="#/set/${enc(set.id)}">${icon('list')}${esc(set.name)} · ${idx + 1} of ${set.items.length}</a>`
               : s.tags && s.tags.length ? `<span class="eyebrow">${esc(s.tags.join(' · '))}</span>` : ''}
             <h1>${esc(s.title)}</h1>
-            ${byline(s) ? `<p class="hero-artist">${esc(byline(s))}</p>` : ''}
+            ${byline(s) ? `<p class="hero-artist">${bylineLinks(s)}</p>` : ''}
           </div>
           <div class="stats">
             <button class="stat stat-btn key-flip" data-act="flip-key" title="Tap to see the original key">
@@ -919,7 +919,8 @@
         </nav>` : ''}
       </div>`;
     drawSong();
-    $('.hero-av.pic')?.closest('.hero').classList.add('has-pic'); // keep the title clear of a saved portrait
+    $('.hero-av.pic')?.closest('.hero').classList.add('has-pic');
+    $('.hero-av')?.addEventListener('click', (e) => { const id = e.currentTarget.dataset.artist; if (id) { e.preventDefault(); go('#/artist/' + id); } }); // keep the title clear of a saved portrait
     requestWake();
     bindSwipe($('#chartCard'));
   }
@@ -3137,6 +3138,12 @@ Jesus is the answer</pre>
    * The picture on song cards: the artist's portrait when there is one, otherwise the key.
    * (Settings → Song pictures can switch it back to always showing the key.)
    */
+  /** The artist line with each name a link to that artist's page (a name with no artist page stays plain text). */
+  function bylineLinks(s) {
+    const one = (n) => { const a = artistByName(n); return a ? `<a class="alink" href="#/artist/${enc(a.id)}">${esc(n)}</a>` : esc(n); };
+    return [s.artist ? one(s.artist) : '', featOf(s).length ? 'ft. ' + featOf(s).map(one).join(', ') : ''].filter(Boolean).join(' ');
+  }
+
   function avHTML(s, extra = '') {
     const a = prefs.pictures === 'key' ? null : artistOf(s);
     if (!a) return `<span class="av ${extra}"><span class="kl">${keyLabel(s)}</span></span>`;
