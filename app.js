@@ -54,7 +54,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 43; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 44; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1489,7 +1489,6 @@
             <div class="pane-h"><h2>Lyrics &amp; chords</h2><button type="button" class="link" id="helpBtn">How to write chords</button></div>
             <div class="get-lyrics">
               <button type="button" class="btn soft" id="findBtn">${icon('globe')}Find lyrics online</button>
-              <button type="button" class="btn soft" id="mtBtn" title="Copy a song page from MultiTracks: exact key, tempo, time and the lyrics in their parts">${icon('music')}From MultiTracks</button>
             </div>
             <div class="chordbar" id="cbar">
               ${CHORD_GROUPS().map((g) => `<div class="cb-group"><span class="cb-label">${g.label}</span><div class="cb-row">${g.sets.map((st) => st.items.map((x) => st.kind === 'own' ? `<button type="button" class="secb own" data-own="1" title="Make your own section, e.g. &lt;Way Maker&gt;">${esc(x)}</button>`
@@ -1763,7 +1762,7 @@ Jesus is the answer</pre>
       found = list;
       const newOnes = list.filter((x) => !have(x.title)).length;
       $('#afNote', d).textContent = list.length
-        ? `${list.length} songs from Apple Music (${list.length - newOnes} already in your library). Tick the ones to add. Songs you already have are never changed. The lyrics come with them; add the key, tempo and chords yourself, or use From MultiTracks in the song.`
+        ? `${list.length} songs from Apple Music (${list.length - newOnes} already in your library). Tick the ones to add. Songs you already have are never changed. The lyrics come with them; add the key, tempo and chords yourself.`
         : 'No songs found. Check the artist’s spelling, or try again later.';
       $('#afList', d).innerHTML = list.map((x, i) => `<label class="pick-row" style="--h:${hueOf(x.title)}"><input type="checkbox" value="${i}">
         <span class="av">${icon('music')}</span><span><b>${esc(x.title)}</b><small>${[normName(x.main) !== normName(a.name) ? esc(x.main) : '', esc(x.album), x.year, x.feat.length ? 'ft. ' + esc(x.feat.join(', ')) : ''].filter(Boolean).join(' · ')}</small></span>${have(x.title) ? '<em>In library</em>' : ''}</label>`).join('');
@@ -3679,44 +3678,6 @@ Jesus is the answer</pre>
     return st.map((x, i) => `${labels[i]}\n${x}`).join('\n\n');
   }
 
-  /** Text copied from a MultiTracks song page -> title, artist, key, tempo, time and the lyrics with their part names. */
-  function parseMultiTracks(text) {
-    const L = String(text || '').replace(/\r/g, '').split('\n').map((x) => x.trim());
-    const meta = L.join(' '), out = {};
-    const k = /\bKey:\s*([A-G](?:#|b|♯|♭)?)(m(?:in(?:or)?)?)?(?![a-z])/.exec(meta);
-    if (k) {
-      const root = k[1].replace('♯', '#').replace('♭', 'b');
-      out.key = { Db: 'C#', 'D#': 'Eb', Gb: 'F#', 'G#': 'Ab', 'A#': 'Bb', Cb: 'B', 'E#': 'F', Fb: 'E', 'B#': 'C' }[root] || root;
-      out.minor = !!k[2];
-    }
-    const b = /\bBPM:\s*(\d+(?:\.\d+)?)/i.exec(meta);
-    if (b && +b[1] >= 20 && +b[1] <= 300) out.tempo = String(Math.round(+b[1]));
-    const t = /\bTime Sig(?:nature)?:\s*(\d{1,2}\/\d{1,2})/i.exec(meta);
-    if (t) out.time = t[1];
-    // the song name sits above "Artist - Album", just over the Key line
-    const ki = L.findIndex((x) => /^Key:\s*[A-G]/.test(x));
-    if (ki > 0) {
-      const above = L.slice(0, ki).filter(Boolean), by = above.pop(), name = above.pop();
-      if (by && name && / - /.test(by) && name.length < 80) { out.title = name; out.artist = by.split(' - ')[0].trim(); }
-    }
-    const li = L.findIndex((x) => /^lyrics$/i.test(x));
-    let body = li >= 0 ? L.slice(li + 1) : L.some((x) => SECTION_RE.test(x)) ? L : [];
-    const stop = body.findIndex((x) => /^(preview|view all|view less|show more|show less|song map)$/i.test(x));
-    if (stop >= 0) body = body.slice(0, stop);
-    const res = [];
-    for (const x of body) {
-      if (!x) continue;
-      if (SECTION_RE.test(x)) res.push('', x.replace(/^pre\s+chorus/i, 'Pre-Chorus').replace(/^post\s+chorus/i, 'Post-Chorus'));
-      else res.push(x);
-    }
-    out.lyrics = res.join('\n').trim();
-    out.parts = res.filter((x) => x && SECTION_RE.test(x)).length;
-    if (!out.parts) out.lyrics = '';
-    return out;
-  }
-
-  const plainTitle = (t) => normName(String(t || '').replace(/\s*[([][^)\]]*[)\]]/g, ' ').replace(/\s+-\s+.*$/, ''));
-  const NOT_STUDIO = /\blive\b|acoustic|instrumental|karaoke|remix|cover|sped up|slowed|reprise|demo|session/i;
   async function lyricsLookup(title, artist) {
     const who = artistQuery(artist);
     const ask = (q) => fetch('https://lrclib.net/api/search?' + new URLSearchParams(q)).then((r) => (r.ok ? r.json() : [])).catch(() => []);
@@ -3796,37 +3757,6 @@ Jesus is the answer</pre>
     };
     $('#findBtn').addEventListener('click', findLyrics);
 
-    // MultiTracks: it won't let other apps read its pages, so the person copies the page and pastes it here
-    $('#mtBtn').addEventListener('click', () => {
-      const d = modal(`
-        <h2>From MultiTracks</h2>
-        <p>MultiTracks has the exact key, tempo, time signature and the lyrics with their parts. It doesn't let other apps read its pages, so copy it across:</p>
-        <ol class="steps"><li>Tap <b>Open MultiTracks</b> and open the song's page.</li><li>If there's a <b>View all</b> under the lyrics, tap it so the whole song shows.</li><li>Select the whole page, copy it, come back and paste it below.</li></ol>
-        <button type="button" class="btn soft" id="mtOpen">${icon('globe')}Open MultiTracks</button>
-        <textarea id="mtText" rows="6" placeholder="Paste the MultiTracks page here" style="margin-top:10px"></textarea>
-        <div class="row"><form method="dialog"><button class="btn ghost" autofocus>Cancel</button></form><button class="btn primary" id="mtUse">Use it</button></div>`);
-      $('#mtOpen', d).addEventListener('click', () => {
-        const q = [f.title.value.trim(), artistQuery(f.artist.value)].filter(Boolean).join(' ');
-        window.open(q ? 'https://www.google.com/search?q=' + enc(`${q} site:multitracks.com/songs`) : 'https://www.multitracks.com/songs/', '_blank', 'noopener');
-      });
-      $('#mtUse', d).addEventListener('click', () => {
-        const m = parseMultiTracks($('#mtText', d).value);
-        const got = [];
-        if (m.title && !f.title.value.trim()) { f.title.value = m.title; f.title.dispatchEvent(new Event('input')); }
-        if (m.artist && !f.artist.value.trim()) { f.artist.value = m.artist; f.artist.dispatchEvent(new Event('fill')); }
-        if (m.key && [...f.key.options].some((o) => o.value === m.key)) { f.key.value = m.key; f.key.dispatchEvent(new Event('change')); got.push('key ' + prettyKey(m.key) + (m.minor ? ' (minor)' : '')); }
-        if (m.tempo) { f.tempo.value = m.tempo; f.tempo.dispatchEvent(new Event('input')); got.push(m.tempo + ' bpm'); }
-        if (m.time) {
-          if (![...f.time.options].some((o) => o.value === m.time)) f.time.add(new Option(m.time, m.time));
-          f.time.value = m.time; got.push(m.time);
-        }
-        if (!got.length && !m.lyrics) { toast('Nothing from MultiTracks found in that. Copy the whole song page and try again.'); return; }
-        d.close();
-        if (m.lyrics) { putLyrics(m.lyrics); got.push(`${m.parts} part${m.parts === 1 ? '' : 's'} of lyrics`); }
-        toast(`From MultiTracks: ${got.join(' · ')}${m.lyrics && m.parts <= 3 ? '. Only the start of the song came through: tap View all on MultiTracks and copy again for the rest' : ''}`);
-      });
-    });
-
     // YouTube: search helper
     $('#ytFind').addEventListener('click', () => {
       if (!f.title.value.trim()) { f.title.focus(); toast('Type the song title first'); return; }
@@ -3855,7 +3785,7 @@ Jesus is the answer</pre>
       f.artist.dispatchEvent(new Event('change'));
       drawArtistBox();
     };
-    // filled in from lyrics or MultiTracks: show it in the list too (a name we don't have yet becomes an artist)
+    // filled in from found lyrics: show it in the list too (a name we don't have yet becomes an artist)
     f.artist.addEventListener('fill', () => {
       const nm = f.artist.value.trim();
       if (!nm) return;
