@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 46; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 47; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -689,9 +689,24 @@
   const go = (hash) => { location.hash = hash; };
 
   /* ================= songs view ================= */
+  // a song with no chords yet (or no words at all) always counts as "Needs chords", without anyone tagging it
+  const NEEDS = 'Needs chords';
+  const chordMemo = new Map();
+  function hasChords(chart) {
+    const key = String(chart || '');
+    if (!chordMemo.has(key)) {
+      if (chordMemo.size > 3000) chordMemo.clear();
+      chordMemo.set(key, toInlineLines(key).some((l) => /\[([^\]]*)\]/.test(l) && [...l.matchAll(/\[([^\]]*)\]/g)].some((m) => m[1].trim().split(/\s+/).some((t) => t && isChordTok(t)))));
+    }
+    return chordMemo.get(key);
+  }
+  const tagsOf = (s) => {
+    const t = s.tags || [];
+    return hasChords(s.chart) || t.some((x) => x.toLowerCase() === NEEDS.toLowerCase()) ? t : [...t, NEEDS];
+  };
   function allTags() {
     const set = new Map();
-    for (const s of songs) for (const t of s.tags || []) set.set(t.toLowerCase(), t);
+    for (const s of songs) for (const t of tagsOf(s)) set.set(t.toLowerCase(), t);
     return [...set.values()].sort((a, b) => a.localeCompare(b));
   }
 
@@ -702,7 +717,7 @@
       <span class="sc-body">
         <span class="sc-title">${esc(s.title)}</span>
         <span class="sc-artist">${esc(byline(s) || 'Unknown artist')}</span>
-        ${s.tags && s.tags.length ? `<span class="sc-tags">${s.tags.slice(0, 3).map((t) => `<i>${esc(t)}</i>`).join('')}</span>` : ''}
+        ${tagsOf(s).length ? `<span class="sc-tags">${tagsOf(s).slice(0, 3).map((t) => `<i>${esc(t)}</i>`).join('')}</span>` : ''}
       </span>
       <span class="sc-meta">${isFav(s.id) ? icon('star', 'fill star') : ''}${s.tempo ? `<span>${esc(s.tempo)} bpm</span>` : ''}${s.time ? `<span>${esc(s.time)}</span>` : ''}</span>
     </a>`;
@@ -770,8 +785,8 @@
       recent: (a, b) => (b.updated || 0) - (a.updated || 0) || a.title.localeCompare(b.title),
     };
     const list = base
-      .filter((s) => !state.tag || (s.tags || []).includes(state.tag))
-      .filter((s) => !q || `${s.title} ${s.artist} ${featOf(s).join(' ')} ${(s.tags || []).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
+      .filter((s) => !state.tag || tagsOf(s).includes(state.tag))
+      .filter((s) => !q || `${s.title} ${s.artist} ${featOf(s).join(' ')} ${tagsOf(s).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
       .sort(sorters[prefs.sort] || sorters.title);
     $('#count').textContent = `${list.length === base.length ? '' : list.length + ' of '}${base.length} song${base.length === 1 ? '' : 's'}`;
     state.visible = list.map((s) => s.id);
@@ -894,7 +909,7 @@
           ${prefs.pictures !== 'key' && s.artist ? avHTML(s, 'hero-av') : ''}
           <div>
             ${set ? `<a class="eyebrow" href="#/set/${enc(set.id)}">${icon('list')}${esc(set.name)} · ${idx + 1} of ${set.items.length}</a>`
-              : s.tags && s.tags.length ? `<span class="eyebrow">${esc(s.tags.join(' · '))}</span>` : ''}
+              : tagsOf(s).length ? `<span class="eyebrow">${esc(tagsOf(s).join(' · '))}</span>` : ''}
             <h1>${esc(s.title)}</h1>
             ${byline(s) ? `<p class="hero-artist">${bylineLinks(s)}</p>` : ''}
           </div>
@@ -1682,7 +1697,9 @@ Jesus is the answer</pre>
         title, artist: f.artist.value.trim(), key,
         featuring: [...new Set(f.featuring.value.split('|').map((x) => x.trim()).filter((x) => x && normName(x) !== normName(f.artist.value)))].join('|'),
         tempo: f.tempo.value ? Math.round(+f.tempo.value) : '',
-        time: f.time.value, info: f.info.value.trim(), chart: text, tags: [...new Set(parseTags())], updated: Date.now(),
+        time: f.time.value, info: f.info.value.trim(), chart: text,
+        // chords just went in: it doesn't need chords any more
+        tags: [...new Set(parseTags())].filter((t) => !(t.toLowerCase() === NEEDS.toLowerCase() && hasChords(text) && !hasChords(existing ? existing.chart : ''))), updated: Date.now(),
         playKey: f.playKey.value && f.playKey.value !== key ? f.playKey.value : '',
         video: f.video.value.trim(),
       };
