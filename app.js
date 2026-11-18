@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 48; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 49; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1571,9 +1571,9 @@
             <label class="field full">Info<textarea name="info" rows="2" placeholder="Feel, arrangement, capo, who leads it…">${esc(s.info)}</textarea></label>
           </div>
         </form>
-        <div class="split">
+        <div class="split${prefs.edPreview === false ? ' no-pv' : ''}" id="edSplit">
           <div class="card pane">
-            <div class="pane-h"><h2>Lyrics &amp; chords</h2><button type="button" class="link" id="helpBtn">How to write chords</button></div>
+            <div class="pane-h"><h2>Lyrics &amp; chords</h2><span class="pane-acts"><button type="button" class="link" id="pvToggle">${prefs.edPreview === false ? 'Show preview' : 'Hide preview'}</button><button type="button" class="link" id="helpBtn">How to write chords</button></span></div>
             <div class="get-lyrics">
               <button type="button" class="btn soft" id="findBtn">${icon('globe')}Find lyrics online</button>
             </div>
@@ -1611,10 +1611,17 @@ Jesus is the answer</pre>
 
     const f = $('#f'), ta = $('#chartInput'), pv = $('#preview');
     const draw = () => {
+      if (prefs.edPreview === false) return; // preview turned off: skip the work
       const key = f.key.value;
       pv.innerHTML = renderChart(ta.value, { mode: prefs.mode, part: state.part, songKey: key, viewKey: key })
         || '<p class="sub">Your chart will show here as you type.</p>';
     };
+    $('#pvToggle').addEventListener('click', (e) => {
+      prefs.edPreview = prefs.edPreview === false; savePrefs();
+      $('#edSplit').classList.toggle('no-pv', !prefs.edPreview);
+      e.currentTarget.textContent = prefs.edPreview ? 'Hide preview' : 'Show preview';
+      draw();
+    });
     // Typing "flat" or "sharp" inside a chord turns into ♭ / ♯ straight away (lyrics are left alone).
     ta.addEventListener('input', () => {
       const before = ta.value;
