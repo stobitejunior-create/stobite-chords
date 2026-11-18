@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 47; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 48; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -775,6 +775,16 @@
     fillList(fav);
   }
 
+  /** Search order: title starts with it, title has it, artist/featured/tags have it, then lyrics. 9 = no match. */
+  function searchRank(s, q) {
+    if (!q) return 0;
+    const t = (s.title || '').toLowerCase();
+    if (t.startsWith(q)) return 0;
+    if (t.includes(q)) return 1;
+    if (`${s.artist || ''} ${featOf(s).join(' ')} ${tagsOf(s).join(' ')}`.toLowerCase().includes(q)) return 2;
+    return stripChords(s.chart).toLowerCase().includes(q) ? 3 : 9;
+  }
+
   function fillList(fav) {
     const q = state.query.trim().toLowerCase();
     const base = fav ? songs.filter((s) => isFav(s.id)) : songs;
@@ -786,8 +796,10 @@
     };
     const list = base
       .filter((s) => !state.tag || tagsOf(s).includes(state.tag))
-      .filter((s) => !q || `${s.title} ${s.artist} ${featOf(s).join(' ')} ${tagsOf(s).join(' ')} ${stripChords(s.chart)}`.toLowerCase().includes(q))
-      .sort(sorters[prefs.sort] || sorters.title);
+      .map((s) => [s, searchRank(s, q)])
+      .filter(([, r]) => r < 9)
+      .sort(([a, ra], [b, rb]) => ra - rb || (sorters[prefs.sort] || sorters.title)(a, b))
+      .map(([s]) => s);
     $('#count').textContent = `${list.length === base.length ? '' : list.length + ' of '}${base.length} song${base.length === 1 ? '' : 's'}`;
     state.visible = list.map((s) => s.id);
     $('#list').classList.toggle('selecting', !!state.selecting);
@@ -1466,8 +1478,8 @@
       <div class="row"><form method="dialog"><button class="btn ghost" autofocus>Cancel</button></form><button class="btn primary" id="pAdd" disabled>Add</button></div>`); // autofocus on Cancel keeps the phone keyboard closed until the search box is tapped
     const draw = () => {
       const q = $('#pq', d).value.trim().toLowerCase();
-      $('#pl', d).innerHTML = [...songs].sort((a, b) => a.title.localeCompare(b.title))
-        .filter((s) => !q || `${s.title} ${s.artist} ${featOf(s).join(' ')}`.toLowerCase().includes(q))
+      const r = (s) => { const t = s.title.toLowerCase(); return !q || t.startsWith(q) ? 0 : t.includes(q) ? 1 : `${s.artist} ${featOf(s).join(' ')}`.toLowerCase().includes(q) ? 2 : 9; };
+      $('#pl', d).innerHTML = [...songs].filter((s) => r(s) < 9).sort((a, b) => r(a) - r(b) || a.title.localeCompare(b.title))
         .map((s) => `<label class="pick-row" style="--h:${hueOf(s.title)}"><input type="checkbox" value="${esc(s.id)}"${chosen.has(s.id) ? ' checked' : ''}>
           <span class="av">${esc(prettyKey(s.key))}</span><span><b>${esc(s.title)}</b><small>${esc(byline(s))}</small></span>${inSet.has(s.id) ? '<em>In set</em>' : ''}</label>`).join('')
         || '<p style="padding:12px 8px">No songs match.</p>';
