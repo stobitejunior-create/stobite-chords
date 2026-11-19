@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 50; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 51; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -700,9 +700,21 @@
     }
     return chordMemo.get(key);
   }
+  // the words of the song (not chords, section names or # notes)
+  const hasWords = (chart) => stripChords(chart).split('\n').some((l) => l.trim() && !SECTION_RE.test(l) && !l.trim().startsWith('#') && !isChordLine(l) && /\p{L}{2,}/u.test(l));
+  const hasTempo = (s) => +s.tempo > 0;
+  const NEED_LYRICS = 'Needs lyrics', NEED_BPM = 'Needs BPM', NEED_KEY = 'Needs key';
+  const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+  // automatic "to do" tags: worked out from the song, never stored, so they come and go by themselves.
+  // A stored Needs lyrics / Needs BPM is hidden once the song has them; Needs key stays until the key is changed or the tag removed.
   const tagsOf = (s) => {
-    const t = s.tags || [];
-    return hasChords(s.chart) || t.some((x) => x.toLowerCase() === NEEDS.toLowerCase()) ? t : [...t, NEEDS];
+    const words = hasWords(s.chart), tempo = hasTempo(s);
+    const t = (s.tags || []).filter((x) => !(same(x, NEED_LYRICS) && words) && !(same(x, NEED_BPM) && tempo));
+    const add = [];
+    if (!hasChords(s.chart)) add.push(NEEDS);
+    if (!words) add.push(NEED_LYRICS);
+    if (!tempo) add.push(NEED_BPM);
+    return [...t, ...add.filter((a) => !t.some((x) => same(x, a)))];
   };
   function allTags() {
     const set = new Map();
@@ -1718,7 +1730,10 @@ Jesus is the answer</pre>
         tempo: f.tempo.value ? Math.round(+f.tempo.value) : '',
         time: f.time.value, info: f.info.value.trim(), chart: text,
         // chords just went in: it doesn't need chords any more
-        tags: [...new Set(parseTags())].filter((t) => !(t.toLowerCase() === NEEDS.toLowerCase() && hasChords(text) && !hasChords(existing ? existing.chart : ''))), updated: Date.now(),
+        // chords just went in: it doesn't need chords any more; the key was changed: it's been checked
+        tags: [...new Set(parseTags())].filter((t) => !(same(t, NEEDS) && hasChords(text) && !hasChords(existing ? existing.chart : ''))
+          && !(same(t, NEED_KEY) && existing && key !== existing.key)
+          && !(same(t, NEED_LYRICS) && hasWords(text)) && !(same(t, NEED_BPM) && +f.tempo.value > 0)), updated: Date.now(),
         playKey: f.playKey.value && f.playKey.value !== key ? f.playKey.value : '',
         video: f.video.value.trim(),
       };
@@ -1887,7 +1902,7 @@ Jesus is the answer</pre>
         const text = texts[i] || '';
         if (!text) noWords++;
         songs.push({ id: uid(), title: x.title, artist: x.main, featuring: [...(normName(x.main) !== normName(a.name) ? [a.name] : []), ...x.feat].filter((n, k, all) => normName(n) !== normName(x.main) && all.findIndex((m) => normName(m) === normName(n)) === k).join('|'),
-          key: 'C', tempo: '', time: '4/4', info: '', tags: text ? ['Needs chords'] : ['Needs lyrics', 'Needs chords'], chart: text ? structureLyrics(text) : '', updated: now + added });
+          key: 'C', tempo: '', time: '4/4', info: '', tags: [NEED_KEY], chart: text ? structureLyrics(text) : '', updated: now + added });
         added++;
       });
       if (added) { ensureArtists(); saveLibrary(); }
@@ -4018,7 +4033,7 @@ Jesus is the answer</pre>
             const text = page.text;
             if (text.replace(/\s/g, '').length < 12) { row.note = 'no words found'; row.cls = 'bad'; continue; }
             const d = parseDraft(text);
-            drafts.push({ thumb: miniThumb(canvas), big: bigThumb(canvas), title: d.title, first: d.first, artist: '', key: d.key || 'C', merge: !d.title && drafts.length > 0, text: d.text, intro: page.intro || '', chords: page.chords || 0 }); // no title on the page: probably the next page of the song above
+            drafts.push({ thumb: miniThumb(canvas), big: bigThumb(canvas), title: d.title, first: d.first, artist: '', key: d.key || 'C', keyFound: !!d.key, merge: !d.title && drafts.length > 0, text: d.text, intro: page.intro || '', chords: page.chords || 0 }); // no title on the page: probably the next page of the song above
             row.note = (d.title ? `“${d.title}”` : 'continues the song above') + (page.chords ? ` · ${page.chords} chords` : ''); row.cls = 'ok';
           } catch (err) { row.note = 'could not open'; row.cls = 'bad'; }
         }
@@ -4088,7 +4103,7 @@ Jesus is the answer</pre>
       if (f === 'artist') {
         if (el.value === '__new') { el.value = d.artist; openArtistEditor(null, (out) => { if (out) { d.artist = out.name; renderReview(); } }); return; }
         d.artist = el.value;
-      } else if (f === 'key') d.key = el.value;
+      } else if (f === 'key') { d.key = el.value; d.keyFound = true; }
       else if (f === 'merge') { d.merge = el.checked; renderReview(); }
     });
     rv.addEventListener('click', (e) => {
@@ -4100,7 +4115,7 @@ Jesus is the answer</pre>
       const out = [];
       drafts.forEach((d, i) => {
         if (d.merge && i > 0 && out.length) out[out.length - 1].chords += d.chords || 0, out[out.length - 1].text += '\n\n' + (d.first ? d.first + '\n' : '') + d.text.trim();
-        else out.push({ title: d.title.trim(), artist: d.artist, key: d.key, text: d.text.trim(), intro: (d.intro || '').trim(), chords: d.chords || 0 });
+        else out.push({ title: d.title.trim(), artist: d.artist, key: d.key, keyFound: !!d.keyFound, text: d.text.trim(), intro: (d.intro || '').trim(), chords: d.chords || 0 });
       });
       const missing = out.findIndex((o) => !o.title);
       if (missing >= 0) {
@@ -4112,7 +4127,7 @@ Jesus is the answer</pre>
       }
       const now = Date.now();
       out.forEach((o, n) => songs.push({
-        id: uid(), title: o.title, artist: o.artist, key: o.key || 'C', tempo: '', time: '4/4', info: '', tags: o.chords ? [] : ['Needs chords'],
+        id: uid(), title: o.title, artist: o.artist, key: o.key || 'C', tempo: '', time: '4/4', info: '', tags: o.keyFound ? [] : [NEED_KEY],
         chart: (o.intro ? `Intro\n${o.intro}\n\n` : '') + structureScanned(o.text), updated: now + n,
       }));
       ensureArtists();
