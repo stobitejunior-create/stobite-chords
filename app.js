@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 51; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 52; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -714,6 +714,7 @@
     if (!hasChords(s.chart)) add.push(NEEDS);
     if (!words) add.push(NEED_LYRICS);
     if (!tempo) add.push(NEED_BPM);
+    if (!keyInfo(s.key)) add.push(NEED_KEY);
     return [...t, ...add.filter((a) => !t.some((x) => same(x, a)))];
   };
   function allTags() {
@@ -803,7 +804,7 @@
     const sorters = {
       title: (a, b) => a.title.localeCompare(b.title),
       artist: (a, b) => (a.artist || '~').localeCompare(b.artist || '~') || a.title.localeCompare(b.title),
-      key: (a, b) => (a.key || '~').localeCompare(b.key || '~') || a.title.localeCompare(b.title),
+      key: (a, b) => (!a.key - !b.key) || (a.key || '').localeCompare(b.key || '') || a.title.localeCompare(b.title), // no key: last
       recent: (a, b) => (b.updated || 0) - (a.updated || 0) || a.title.localeCompare(b.title),
     };
     const list = base
@@ -996,7 +997,8 @@
     const o = viewOpts(s);
     const used = lyrics ? [] : chordsUsed(s.chart, o);
     $('#used').innerHTML = used.length ? `<span>${state.part === 'bass' ? 'Bass notes' : 'Chords'}</span>${used.join('')}` : '';
-    $('#chart').innerHTML = renderChart(s.chart, o) || '<p class="sub">This song has no lyrics yet. Tap Edit to add them.</p>';
+    $('#chart').innerHTML = (prefs.mode === 'letters' && !keyInfo(o.viewKey || o.songKey) ? '<p class="sub key-note">This song has no key yet, so letters can’t be shown. Tap Edit and pick the key.</p>' : '')
+      + (renderChart(s.chart, o) || '<p class="sub">This song has no lyrics yet. Tap Edit to add them.</p>');
     layoutStage();
     $('#tp')?.addEventListener('change', (e) => {
       const v = e.target.value;
@@ -1547,8 +1549,8 @@
   function viewEditor(id) {
     const existing = id ? byId(id) : null;
     if (id && !existing) { go('#/'); return; }
-    const s = existing || { title: '', artist: '', key: 'C', tempo: '', time: '4/4', info: '', chart: '', tags: [] };
-    const keys = KEYS.includes(s.key) ? KEYS : [s.key, ...KEYS];
+    const s = existing || { title: '', artist: '', key: '', tempo: '', time: '4/4', info: '', chart: '', tags: [] };
+    const keys = !s.key || KEYS.includes(s.key) ? KEYS : [s.key, ...KEYS];
     const times = TIMES.includes(s.time) ? TIMES : [s.time, ...TIMES];
     document.title = `${existing ? 'Edit' : 'New song'} · Stobite Chords`;
     document.body.classList.toggle('bass', state.part === 'bass');
@@ -1573,7 +1575,7 @@
               <div class="feat-chips" id="featChips"></div>
               <select name="featSel" aria-label="Add a featured artist"></select>
               <input type="hidden" name="featuring" value="${esc(s.featuring || '')}"></div>
-            <label class="field">Original key<select name="key">${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
+            <label class="field">Original key<select name="key"><option value=""${s.key ? '' : ' selected'}>Not set</option>${keys.map((k) => `<option value="${esc(k)}"${k === s.key ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <label class="field">We play it in<select name="playKey"><option value="">Same as original</option>${keys.map((k) => `<option value="${esc(k)}"${k === s.playKey ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('')}</select></label>
             <div class="field">Tempo (bpm)<div class="with-btn"><input name="tempo" type="number" inputmode="numeric" min="20" max="300" value="${esc(s.tempo)}" placeholder="72" aria-label="Tempo"><button type="button" class="btn soft" id="tap" title="Tap along to the beat">${icon('hand')}Tap</button></div></div>
             <label class="field time">Time<select name="time">${times.map((t) => `<option${t === s.time ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
@@ -1723,6 +1725,8 @@ Jesus is the answer</pre>
       if (!title) { f.title.focus(); toast('Give the song a title'); return; }
       if (f.video.value.trim() && !ytParse(f.video.value)) { f.video.focus(); toast('That doesn’t look like a YouTube link'); return; }
       const key = f.key.value;
+      // letter chords are turned into numbers from the key, so they need one
+      if (!key && convertLetters(ta.value, 'C').changed) { f.key.focus(); toast('Pick the key first: letter chords like G or Em are turned into numbers from it'); return; }
       const { text, changed } = convertLetters(ta.value.replace(/\s+$/, ''), key);
       const data = {
         title, artist: f.artist.value.trim(), key,
@@ -1902,7 +1906,7 @@ Jesus is the answer</pre>
         const text = texts[i] || '';
         if (!text) noWords++;
         songs.push({ id: uid(), title: x.title, artist: x.main, featuring: [...(normName(x.main) !== normName(a.name) ? [a.name] : []), ...x.feat].filter((n, k, all) => normName(n) !== normName(x.main) && all.findIndex((m) => normName(m) === normName(n)) === k).join('|'),
-          key: 'C', tempo: '', time: '4/4', info: '', tags: [NEED_KEY], chart: text ? structureLyrics(text) : '', updated: now + added });
+          key: '', tempo: '', time: '4/4', info: '', tags: [], chart: text ? structureLyrics(text) : '', updated: now + added });
         added++;
       });
       if (added) { ensureArtists(); saveLibrary(); }
@@ -4033,7 +4037,7 @@ Jesus is the answer</pre>
             const text = page.text;
             if (text.replace(/\s/g, '').length < 12) { row.note = 'no words found'; row.cls = 'bad'; continue; }
             const d = parseDraft(text);
-            drafts.push({ thumb: miniThumb(canvas), big: bigThumb(canvas), title: d.title, first: d.first, artist: '', key: d.key || 'C', keyFound: !!d.key, merge: !d.title && drafts.length > 0, text: d.text, intro: page.intro || '', chords: page.chords || 0 }); // no title on the page: probably the next page of the song above
+            drafts.push({ thumb: miniThumb(canvas), big: bigThumb(canvas), title: d.title, first: d.first, artist: '', key: d.key || '', merge: !d.title && drafts.length > 0, text: d.text, intro: page.intro || '', chords: page.chords || 0 }); // no title on the page: probably the next page of the song above
             row.note = (d.title ? `“${d.title}”` : 'continues the song above') + (page.chords ? ` · ${page.chords} chords` : ''); row.cls = 'ok';
           } catch (err) { row.note = 'could not open'; row.cls = 'bad'; }
         }
@@ -4053,7 +4057,7 @@ Jesus is the answer</pre>
     });
 
     const artistOptions = (cur) => `<option value="">No artist</option>${sortedArtists().map((a) => `<option value="${esc(a.name)}"${normName(a.name) === normName(cur) ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}<option value="__new">＋ Add a new artist…</option>`;
-    const keyOptions = (cur) => KEYS.map((k) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('');
+    const keyOptions = (cur) => `<option value=""${cur ? '' : ' selected'}>Not set</option>` + KEYS.map((k) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('');
 
     function renderReview() {
       const rv = $('#scanReview');
@@ -4103,7 +4107,7 @@ Jesus is the answer</pre>
       if (f === 'artist') {
         if (el.value === '__new') { el.value = d.artist; openArtistEditor(null, (out) => { if (out) { d.artist = out.name; renderReview(); } }); return; }
         d.artist = el.value;
-      } else if (f === 'key') { d.key = el.value; d.keyFound = true; }
+      } else if (f === 'key') d.key = el.value;
       else if (f === 'merge') { d.merge = el.checked; renderReview(); }
     });
     rv.addEventListener('click', (e) => {
@@ -4115,7 +4119,7 @@ Jesus is the answer</pre>
       const out = [];
       drafts.forEach((d, i) => {
         if (d.merge && i > 0 && out.length) out[out.length - 1].chords += d.chords || 0, out[out.length - 1].text += '\n\n' + (d.first ? d.first + '\n' : '') + d.text.trim();
-        else out.push({ title: d.title.trim(), artist: d.artist, key: d.key, keyFound: !!d.keyFound, text: d.text.trim(), intro: (d.intro || '').trim(), chords: d.chords || 0 });
+        else out.push({ title: d.title.trim(), artist: d.artist, key: d.key, text: d.text.trim(), intro: (d.intro || '').trim(), chords: d.chords || 0 });
       });
       const missing = out.findIndex((o) => !o.title);
       if (missing >= 0) {
@@ -4127,7 +4131,7 @@ Jesus is the answer</pre>
       }
       const now = Date.now();
       out.forEach((o, n) => songs.push({
-        id: uid(), title: o.title, artist: o.artist, key: o.key || 'C', tempo: '', time: '4/4', info: '', tags: o.keyFound ? [] : [NEED_KEY],
+        id: uid(), title: o.title, artist: o.artist, key: o.key || '', tempo: '', time: '4/4', info: '', tags: [],
         chart: (o.intro ? `Intro\n${o.intro}\n\n` : '') + structureScanned(o.text), updated: now + n,
       }));
       ensureArtists();
@@ -4162,7 +4166,7 @@ Jesus is the answer</pre>
     modal(`
       <div class="chord-head">
         <div class="chord-big">${chordHTML(tok, o)}</div>
-        <div><h2>${esc(sp.name)}${sp.bass ? ` <span class="over">over ${esc(sp.bass.name)}</span>` : ''}</h2><p>Key of ${esc(prettyKey(viewKey || songKey || 'C'))}</p></div>
+        <div><h2>${esc(sp.name)}${sp.bass ? ` <span class="over">over ${esc(sp.bass.name)}</span>` : ''}</h2><p>${keyInfo(viewKey || songKey) ? 'Key of ' + esc(prettyKey(viewKey || songKey)) : 'No key set yet: shown in C'}</p></div>
       </div>
       ${pianoSVG(sp)}
       <div class="notes">${sp.notes.map((n, i) => `<div class="note-chip${i === 0 ? ' first' : ''}"><b>${esc(n.name)}</b></div>`).join('')}</div>

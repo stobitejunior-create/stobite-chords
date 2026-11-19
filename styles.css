@@ -872,3 +872,4 @@ body.stage .chart.is-split { column-count: auto !important; }
 .split-col:first-child { padding-left: 0; }
 .split-col:last-child { padding-right: 0; }
 .split-col + .split-col { border-left: 1px solid var(--line); }
+.key-note { margin: 0 0 12px; font-size: 14px; }
