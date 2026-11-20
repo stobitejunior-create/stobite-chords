@@ -923,3 +923,6 @@ dialog.modal { box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow-lg); }
 dialog.modal::backdrop { background: rgb(12 8 30 / .35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 body.stage .controls, body.stage .chart-card { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 @media print { body::before { display: none; } }
+/* a run like 1-2-3: every chord in it the same small size */
+.chart .c .run { font-size: .78em; }
+.chart .c .run i { font-style: normal; opacity: .55; padding: 0 1px; }

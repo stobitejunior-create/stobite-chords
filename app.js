@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 54; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 55; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -301,7 +301,16 @@
     return esc(degName(r.acc, r.deg, r.post, o.mode, o.viewKey)) + q(r.shown) + bassHTML;
   }
   /** Clickable chord: tapping it opens the note spelling. */
-  const chordBtn = (tok, o) => (resolveChord(tok, o.songKey) ? `<span class="ch" data-ch="${esc(tok)}">${chordHTML(tok, o)}</span>` : esc(tok));
+  const oneChordBtn = (tok, o) => (resolveChord(tok, o.songKey) ? `<span class="ch" data-ch="${esc(tok)}">${chordHTML(tok, o)}</span>` : esc(tok));
+  /** A quick run of chords written with dashes, e.g. 1-2-3: each one is its own chord (not "1" with "-2-3" as its type). */
+  function runParts(tok) {
+    const parts = String(tok).split(/[-–]/);
+    return parts.length > 1 && parts.every((p) => p && resolveChord(p)) ? parts : null;
+  }
+  const chordBtn = (tok, o) => {
+    const parts = runParts(tok);
+    return parts ? `<span class="run">${parts.map((p) => oneChordBtn(p, o)).join('<i>-</i>')}</span>` : oneChordBtn(tok, o);
+  };
 
   /* ================= chord spelling ================= */
   /** Chord quality -> chord tones as {semi above root, letter step above root, label}. */
@@ -541,7 +550,7 @@
     const seen = new Set(), out = [];
     for (const line of toInlineLines(text)) {
       line.replace(/\[([^\]]*)\]/g, (m, c) => {
-        for (const t of c.trim().split(/\s+/)) {
+        for (const t of c.trim().split(/\s+/).flatMap((x) => runParts(x) || [x])) {
           if (!isChordTok(t)) continue;
           const h = chordHTML(t, o);
           if (!seen.has(h)) { seen.add(h); out.push(`<b class="ch" data-ch="${esc(t)}">${h}</b>`); }
