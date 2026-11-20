@@ -55,7 +55,7 @@
   };
   const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
-  const APP_VERSION = 52; // shown in Settings; keep in step with CACHE in sw.js
+  const APP_VERSION = 53; // shown in Settings; keep in step with CACHE in sw.js
 
   /* ================= storage ================= */
   const LIB_KEY = 'stobite-chords:library';
@@ -1821,9 +1821,35 @@ Jesus is the answer</pre>
     return { title: t.replace(/\s+/g, ' ').trim(), feat };
   }
 
-  /** The artist's real releases from the Apple Music catalogue (one entry per song, the studio version when there is one). */
-  async function artistTracks(artist) {
-    const who = artistQuery(artist), want = normName(who);
+  /** Deezer's public API has no CORS headers, but it answers JSONP (a script tag), which works from any page. */
+  async function jsonp(url, tries = 5) {
+    for (let i = 0; i < tries; i++) {
+      const v = await jsonpOnce(url);
+      if (v !== 'busy') return v;
+      await new Promise((r) => setTimeout(r, 1200 * (i + 1))); // Deezer allows about 50 requests per 5 seconds: wait and try again
+    }
+    return null;
+  }
+  function jsonpOnce(url, ms = 12000) {
+    return new Promise((resolve) => {
+      const cb = 'dz' + Math.random().toString(36).slice(2), sc = document.createElement('script');
+      const done = (v) => { clearTimeout(t); delete window[cb]; sc.remove(); resolve(v); };
+      const t = setTimeout(() => done(null), ms);
+      window[cb] = (v) => done(v && v.error ? (v.error.code === 4 ? 'busy' : null) : v || null);
+      sc.onerror = () => done(null);
+      sc.src = url + (url.includes('?') ? '&' : '?') + 'output=jsonp&callback=' + cb;
+      document.head.appendChild(sc);
+    });
+  }
+  /** Run jobs n at a time. */
+  async function pool(items, n, job) {
+    const out = new Array(items.length); let next = 0;
+    await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) { const i = next++; out[i] = await job(items[i], i).catch(() => null); } }));
+    return out;
+  }
+
+  /** Apple Music tracks, as { name, artist, album, date, secs }. */
+  async function appleTracks(who, want) {
     const it = (u) => fetch(u).then((r) => (r.ok ? r.json() : {})).then((d) => d.results || []).catch(() => []);
     const ids = (await it(`https://itunes.apple.com/search?entity=musicArtist&limit=10&term=${enc(who)}`))
       .filter((x) => normName(x.artistName) === want).map((x) => x.artistId).slice(0, 2);
@@ -1831,21 +1857,45 @@ Jesus is the answer</pre>
       ...ids.map((id) => it(`https://itunes.apple.com/lookup?id=${id}&entity=song&limit=200`)),
       it(`https://itunes.apple.com/search?entity=song&attribute=artistTerm&limit=200&term=${enc(who)}`),
     ]);
+    return lists.flat().filter((x) => x.wrapperType === 'track' && x.kind === 'song')
+      .map((x) => ({ name: x.trackName, artist: x.artistName || '', album: x.collectionName || '', date: x.releaseDate || '', secs: Math.round((x.trackTimeMillis || 0) / 1000) }));
+  }
+  /** Deezer tracks (every album, EP and single of the artist), same shape. */
+  async function deezerTracks(who, want) {
+    const found = await jsonp(`https://api.deezer.com/search/artist?q=${enc(who)}&limit=10`);
+    const art = ((found && found.data) || []).filter((x) => normName(x.name) === want).sort((p, q) => (q.nb_fan || 0) - (p.nb_fan || 0))[0]; // same name twice: the real one has the fans
+    if (!art) return [];
+    const albums = [];
+    for (let url = `https://api.deezer.com/artist/${art.id}/albums?limit=100`, n = 0; url && n < 3; n++) {
+      const page = await jsonp(url);
+      if (!page) break;
+      albums.push(...(page.data || []));
+      url = page.next || '';
+    }
+    const lists = await pool(albums.slice(0, 120), 4, (al) => jsonp(`https://api.deezer.com/album/${al.id}/tracks?limit=100`)
+      .then((r) => ((r && r.data) || []).map((x) => ({ name: x.title, artist: (x.artist && x.artist.name) || art.name, album: al.title || '', date: al.release_date || '', secs: x.duration || 0 }))));
+    return lists.flat().filter(Boolean);
+  }
+
+  /** The artist's real releases from Apple Music and Deezer together (one entry per song, the studio version when there is one). */
+  async function artistTracks(artist) {
+    const who = artistQuery(artist), want = normName(who);
+    const [apple, deezer] = await Promise.all([appleTracks(who, want).catch(() => []), deezerTracks(who, want).catch(() => [])]);
     const out = new Map();
-    for (const x of lists.flat()) {
-      if (x.wrapperType !== 'track' || x.kind !== 'song' || /instrumental|karaoke|backing track|accompaniment|performance track|split track|demonstration/i.test(`${x.trackName} ${x.collectionName}`)) continue;
-      const { title, feat } = cleanTrack(x.trackName, who);
+    for (const x of [...apple, ...deezer]) {
+      if (!x.name || /instrumental|karaoke|backing track|accompaniment|performance track|split track|demonstration/i.test(`${x.name} ${x.album}`)) continue;
+      const { title, feat } = cleanTrack(x.name, who);
       // "Chris Tomlin & Pat Barrett" -> Chris Tomlin ft. Pat Barrett; a song where they're only featured stays under its own artist
-      const credit = x.artistName.split(/\s*(?:,|&|\band\b)\s*/).map((n) => n.trim()).filter(Boolean);
-      if (!credit.some((n) => normName(n) === want) && !normName(x.artistName).includes(want) && !feat.some((n) => normName(n) === want)) continue;
-      const main = credit.length > 1 && credit.some((n) => normName(n) === want) ? credit[0] : x.artistName;
+      const credit = x.artist.split(/\s*(?:,|&|\band\b)\s*/).map((n) => n.trim()).filter(Boolean);
+      if (!credit.some((n) => normName(n) === want) && !normName(x.artist).includes(want) && !feat.some((n) => normName(n) === want)) continue;
+      const main = credit.length > 1 && credit.some((n) => normName(n) === want) ? credit[0] : x.artist;
       const k = plainTitle(title);
       if (!k) continue;
-      const item = { title, main, feat: [...new Set([...credit.slice(main === credit[0] ? 1 : credit.length), ...feat])], album: (x.collectionName || '').replace(/\s+-\s+(Single|EP)$/i, ''), year: (x.releaseDate || '').slice(0, 4), secs: Math.round((x.trackTimeMillis || 0) / 1000), alt: NOT_STUDIO.test(`${x.trackName} ${x.collectionName}`) };
+      const item = { title, main, feat: [...new Set([...credit.slice(main === credit[0] ? 1 : credit.length), ...feat])], album: x.album.replace(/\s+-\s+(Single|EP)$/i, ''), year: x.date.slice(0, 4), secs: x.secs, alt: NOT_STUDIO.test(`${x.name} ${x.album}`) };
       const had = out.get(k);
-      if (!had || (had.alt && !item.alt) || (had.alt === item.alt && item.year && item.year < had.year)) out.set(k, item); // studio first, then the first release
+      if (!had || (had.alt && !item.alt) || (had.alt === item.alt && item.year && (!had.year || item.year < had.year))) out.set(k, item); // studio first, then the first release
     }
-    return [...out.values()].sort((p, q) => p.title.localeCompare(q.title));
+    return { list: [...out.values()].sort((p, q) => p.title.localeCompare(q.title)), apple: apple.length > 0, deezer: deezer.length > 0 };
   }
 
   /** Lyrics for that exact recording (same artist, title and length), or '' when the lyrics service hasn't got it. */
@@ -1856,7 +1906,11 @@ Jesus is the answer</pre>
     const list = (await ask('search', { artist_name: artistQuery(x.main), track_name: x.title })) || [];
     const best = list.filter((y) => y.plainLyrics && plainTitle(cleanTrack(y.trackName, x.main).title) === plainTitle(x.title) && !/instrumental/i.test(y.trackName))
       .sort((a, b) => (NOT_STUDIO.test(a.trackName + ' ' + a.albumName) - NOT_STUDIO.test(b.trackName + ' ' + b.albumName)) || Math.abs((a.duration || 0) - x.secs) - Math.abs((b.duration || 0) - x.secs));
-    return best[0] ? best[0].plainLyrics : '';
+    if (best[0]) return best[0].plainLyrics;
+    // wider net: LRCLIB free-text search and lyrics.ovh, keeping only the same title by the same artist
+    const wa = normName(artistQuery(x.main)), more = await lyricsLookup(x.title, x.main).catch(() => []);
+    const hit = more.find((y) => plainTitle(y.title) === plainTitle(x.title) && (normName(y.artist).includes(wa) || wa.includes(normName(y.artist))));
+    return hit ? hit.text : '';
   }
 
   function openArtistSongs(a) {
@@ -1873,15 +1927,16 @@ Jesus is the answer</pre>
       b.disabled = !chosen.size || busy;
       if (!busy) b.textContent = n ? `Add ${n} song${n > 1 ? 's' : ''}` : 'Add';
     };
-    artistTracks(a.name).then((list) => {
+    artistTracks(a.name).then(({ list, apple, deezer }) => {
       found = list;
+      const from = [apple && 'Apple Music', deezer && 'Deezer'].filter(Boolean).join(' and ');
       const newOnes = list.filter((x) => !have(x.title)).length;
       $('#afNote', d).textContent = list.length
-        ? `${list.length} songs from Apple Music (${list.length - newOnes} already in your library). Tick the ones to add. Songs you already have are never changed. The lyrics come with them; add the key, tempo and chords yourself.`
+        ? `${list.length} songs from ${from} (${list.length - newOnes} already in your library). Tick the ones to add. Songs you already have are never changed. The lyrics come with them; add the key, tempo and chords yourself.`
         : 'No songs found. Check the artist’s spelling, or try again later.';
       $('#afList', d).innerHTML = list.map((x, i) => `<label class="pick-row" style="--h:${hueOf(x.title)}"><input type="checkbox" value="${i}">
         <span class="av">${icon('music')}</span><span><b>${esc(x.title)}</b><small>${[normName(x.main) !== normName(a.name) ? esc(x.main) : '', esc(x.album), x.year, x.feat.length ? 'ft. ' + esc(x.feat.join(', ')) : ''].filter(Boolean).join(' · ')}</small></span>${have(x.title) ? '<em>In library</em>' : ''}</label>`).join('');
-    }).catch(() => { $('#afNote', d).textContent = 'Couldn’t reach Apple Music. Check your connection and try again.'; });
+    }).catch(() => { $('#afNote', d).textContent = 'Couldn’t reach the music catalogues. Check your connection and try again.'; });
     $('#afList', d).addEventListener('change', (e) => { if (e.target.checked) chosen.add(+e.target.value); else chosen.delete(+e.target.value); refresh(); });
     $('#afAdd', d).addEventListener('click', async () => {
       const todo = [...chosen].map((i) => found[i]).filter((x) => !have(x.title));
@@ -3793,6 +3848,9 @@ Jesus is the answer</pre>
     return st.map((x, i) => `${labels[i]}\n${x}`).join('\n\n');
   }
 
+  // a title without brackets or " - Live" style endings, for matching the same song across versions
+  const plainTitle = (t) => normName(String(t || '').replace(/\s*[([][^)\]]*[)\]]/g, ' ').replace(/\s+-\s+.*$/, ''));
+  const NOT_STUDIO = /\blive\b|acoustic|instrumental|karaoke|remix|cover|sped up|slowed|reprise|demo|session/i;
   async function lyricsLookup(title, artist) {
     const who = artistQuery(artist);
     const ask = (q) => fetch('https://lrclib.net/api/search?' + new URLSearchParams(q)).then((r) => (r.ok ? r.json() : [])).catch(() => []);
